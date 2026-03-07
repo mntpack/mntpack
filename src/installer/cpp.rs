@@ -12,10 +12,6 @@ use super::driver::{DriverRuntime, InstallContext, InstallDriver, InstallResult,
 pub struct CppDriver;
 
 impl InstallDriver for CppDriver {
-    fn name(&self) -> &'static str {
-        "cpp"
-    }
-
     fn detect(&self, repo_path: &Path) -> bool {
         repo_path.join("CMakeLists.txt").exists()
             || repo_path.join("Makefile").exists()
@@ -41,7 +37,7 @@ impl InstallDriver for CppDriver {
             .unwrap_or_else(|| ctx.package_name.clone());
 
         Ok(InstallResult {
-            binary_path: binary,
+            binary_path: Some(binary),
             shim_name,
         })
     }

@@ -7,10 +7,6 @@ use super::driver::{
 pub struct PythonDriver;
 
 impl InstallDriver for PythonDriver {
-    fn name(&self) -> &'static str {
-        "python"
-    }
-
     fn detect(&self, repo_path: &std::path::Path) -> bool {
         repo_path.join("requirements.txt").exists() || repo_path.join("pyproject.toml").exists()
     }
@@ -25,8 +21,14 @@ impl InstallDriver for PythonDriver {
             )?;
         }
 
+        let binary = if ctx.manifest.as_ref().and_then(|m| m.bin.as_ref()).is_some() {
+            Some(manifest_bin(ctx)?)
+        } else {
+            None
+        };
+
         Ok(InstallResult {
-            binary_path: manifest_bin(ctx)?,
+            binary_path: binary,
             shim_name: ctx.package_name.clone(),
         })
     }

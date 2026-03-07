@@ -21,12 +21,11 @@ pub struct DriverRuntime<'a> {
 
 #[derive(Debug, Clone)]
 pub struct InstallResult {
-    pub binary_path: PathBuf,
+    pub binary_path: Option<PathBuf>,
     pub shim_name: String,
 }
 
 pub trait InstallDriver: Send + Sync {
-    fn name(&self) -> &'static str;
     fn detect(&self, repo_path: &Path) -> bool;
     fn install(&self, ctx: &InstallContext, runtime: &DriverRuntime<'_>) -> Result<InstallResult>;
 }

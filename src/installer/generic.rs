@@ -7,10 +7,6 @@ use super::driver::{
 pub struct GenericDriver;
 
 impl InstallDriver for GenericDriver {
-    fn name(&self) -> &'static str {
-        "generic"
-    }
-
     fn detect(&self, _repo_path: &std::path::Path) -> bool {
         true
     }
@@ -19,13 +15,21 @@ impl InstallDriver for GenericDriver {
         let Some(manifest) = &ctx.manifest else {
             bail!("generic installs require mntpack.json");
         };
-        let Some(build_command) = &manifest.build else {
-            bail!("generic installs require a 'build' command in mntpack.json");
+
+        if let Some(build_command) = &manifest.build {
+            run_shell_command(build_command, &ctx.repo_path)?;
+        }
+
+        let binary = if manifest.bin.is_some() {
+            Some(manifest_bin(ctx)?)
+        } else if manifest.resolve_run_command().is_some() {
+            None
+        } else {
+            bail!("generic installs require either 'run' command or 'bin' path in mntpack.json");
         };
 
-        run_shell_command(build_command, &ctx.repo_path)?;
         Ok(InstallResult {
-            binary_path: manifest_bin(ctx)?,
+            binary_path: binary,
             shim_name: ctx.package_name.clone(),
         })
     }

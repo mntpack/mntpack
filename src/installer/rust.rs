@@ -10,10 +10,6 @@ use super::driver::{
 pub struct RustDriver;
 
 impl InstallDriver for RustDriver {
-    fn name(&self) -> &'static str {
-        "rust"
-    }
-
     fn detect(&self, repo_path: &std::path::Path) -> bool {
         repo_path.join("Cargo.toml").exists()
     }
@@ -29,14 +25,14 @@ impl InstallDriver for RustDriver {
             let bin = manifest_bin(ctx)?;
             return Ok(InstallResult {
                 shim_name: infer_shim_name(&bin, &ctx.package_name),
-                binary_path: bin,
+                binary_path: Some(bin),
             });
         }
 
         let binary = infer_rust_binary(ctx)?;
         Ok(InstallResult {
             shim_name: infer_shim_name(&binary, &ctx.package_name),
-            binary_path: binary,
+            binary_path: Some(binary),
         })
     }
 }

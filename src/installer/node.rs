@@ -7,10 +7,6 @@ use super::driver::{
 pub struct NodeDriver;
 
 impl InstallDriver for NodeDriver {
-    fn name(&self) -> &'static str {
-        "node"
-    }
-
     fn detect(&self, repo_path: &std::path::Path) -> bool {
         repo_path.join("package.json").exists()
     }
@@ -22,8 +18,14 @@ impl InstallDriver for NodeDriver {
             &ctx.repo_path,
         )?;
 
+        let binary = if ctx.manifest.as_ref().and_then(|m| m.bin.as_ref()).is_some() {
+            Some(manifest_bin(ctx)?)
+        } else {
+            None
+        };
+
         Ok(InstallResult {
-            binary_path: manifest_bin(ctx)?,
+            binary_path: binary,
             shim_name: ctx.package_name.clone(),
         })
     }

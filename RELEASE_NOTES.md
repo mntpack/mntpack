@@ -1,5 +1,22 @@
 # Release Notes
 
+## 0.1.3 - 2026-03-07
+
+### Added
+- `mntpack.json` run-command support:
+  - `run: "<command>"` for all targets
+  - `run: { "<target>": "<command>" }` for per-target commands
+- Generic packages can now install with `run` command only (no `bin` required).
+
+### Changed
+- Generic `build` is now optional.
+- Generic driver install logs are no longer printed during sync.
+- Shims now call `mntpack run <package>` first, then fall back to direct binary only if needed.
+- `run` now supports command-driven packages via saved `run` command metadata.
+- `sync`/`update` now reliably repull by syncing to origin default branch when not version-pinned.
+- Package name conflict checks now only consider successful installs (record-based), not leftover directories.
+- `update <package>` mirrors `sync` behavior and updates installed packages by package name.
+
 ## 0.1.2 - 2026-03-07
 
 ### Added

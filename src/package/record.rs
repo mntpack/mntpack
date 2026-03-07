@@ -12,7 +12,8 @@ pub struct PackageRecord {
     pub owner: String,
     pub repo: String,
     pub version: Option<String>,
-    pub binary_rel_path: String,
+    pub binary_rel_path: Option<String>,
+    pub run_command: Option<String>,
     pub global: bool,
 }
 

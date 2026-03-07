@@ -2,7 +2,9 @@ use std::{collections::HashSet, process::Command};
 
 use anyhow::{Context, Result, bail};
 
-use crate::{config::RuntimeContext, package::record::load_record};
+use crate::{
+    config::RuntimeContext, installer::driver::run_shell_command, package::record::load_record,
+};
 
 pub async fn execute(runtime: &RuntimeContext, package_name: &str, args: &[String]) -> Result<()> {
     let package_dir = runtime.paths.package_dir(package_name);
@@ -25,8 +27,16 @@ pub async fn execute(runtime: &RuntimeContext, package_name: &str, args: &[Strin
         }
     }
 
-    let binary_path = if let Some(record) = load_record(&package_dir)? {
-        package_dir.join(record.binary_rel_path)
+    let Some(record) = load_record(&package_dir)? else {
+        bail!("package metadata for '{package_name}' is missing");
+    };
+
+    if let Some(run_command) = record.run_command.as_deref() {
+        return execute_run_command(runtime, &record, run_command, args);
+    }
+
+    let binary_path = if let Some(binary_rel_path) = record.binary_rel_path.as_deref() {
+        package_dir.join(binary_rel_path)
     } else if cfg!(windows) {
         package_dir.join(format!("{package_name}.exe"))
     } else {
@@ -52,4 +62,39 @@ pub async fn execute(runtime: &RuntimeContext, package_name: &str, args: &[Strin
         );
     }
     Ok(())
+}
+
+fn execute_run_command(
+    runtime: &RuntimeContext,
+    record: &crate::package::record::PackageRecord,
+    base_command: &str,
+    args: &[String],
+) -> Result<()> {
+    let repo_key = crate::config::repo_key(&record.owner, &record.repo);
+    let repo_dir = runtime.paths.repo_dir(&repo_key);
+    if !repo_dir.exists() {
+        bail!(
+            "repository directory not found for '{}'",
+            record.package_name
+        );
+    }
+
+    let command = append_args(base_command, args);
+    run_shell_command(&command, &repo_dir)
+}
+
+fn append_args(base_command: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        return base_command.to_string();
+    }
+    let escaped: Vec<String> = args.iter().map(|arg| shell_escape(arg)).collect();
+    format!("{base_command} {}", escaped.join(" "))
+}
+
+fn shell_escape(input: &str) -> String {
+    if cfg!(windows) {
+        format!("\"{}\"", input.replace('"', "\\\""))
+    } else {
+        format!("'{}'", input.replace('\'', "'\"'\"'"))
+    }
 }

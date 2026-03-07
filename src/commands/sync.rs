@@ -84,6 +84,7 @@ pub async fn sync_package_internal(
 
     sync_repo(&resolved, &repo_dir, version)?;
     let manifest = Manifest::load(&repo_dir)?;
+    let run_command = manifest.as_ref().and_then(|m| m.resolve_run_command());
 
     if let Some(manifest) = &manifest {
         for dependency in &manifest.dependencies {
@@ -104,13 +105,22 @@ pub async fn sync_package_internal(
     };
 
     let (installed_binary, shim_name) = if let Some(manifest) = &manifest {
-        if let Some(release_binary) =
-            try_download_release_binary(runtime, &resolved, manifest).await?
-        {
-            (
-                materialize_binary(&release_binary, &package_dir, &package_name)?,
-                package_name.clone(),
-            )
+        if run_command.is_none() {
+            if let Some(release_binary) =
+                try_download_release_binary(runtime, &resolved, manifest).await?
+            {
+                (
+                    Some(materialize_binary(
+                        &release_binary,
+                        &package_dir,
+                        &package_name,
+                    )?),
+                    package_name.clone(),
+                )
+            } else {
+                let result = InstallerManager::new().install(&installer_ctx, &runtime_driver)?;
+                (result.binary_path, result.shim_name)
+            }
         } else {
             let result = InstallerManager::new().install(&installer_ctx, &runtime_driver)?;
             (result.binary_path, result.shim_name)
@@ -125,7 +135,12 @@ pub async fn sync_package_internal(
     }
 
     if global {
-        create_shim(runtime, &package_name, &shim_name, &installed_binary)?;
+        create_shim(
+            runtime,
+            &package_name,
+            &shim_name,
+            installed_binary.as_deref(),
+        )?;
         if ensure_bin_on_path(runtime)? {
             println!(
                 "added '{}' to PATH for global shims",
@@ -134,17 +149,19 @@ pub async fn sync_package_internal(
         }
     }
 
-    let binary_rel_path = installed_binary
-        .strip_prefix(&package_dir)
-        .unwrap_or(&installed_binary)
-        .to_string_lossy()
-        .to_string();
+    let binary_rel_path = installed_binary.as_ref().map(|path| {
+        path.strip_prefix(&package_dir)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string()
+    });
 
     let record = PackageRecord {
         package_name,
         owner: resolved.owner.clone(),
         repo: resolved.repo.clone(),
         version: version.map(|v| v.to_string()),
+        run_command,
         binary_rel_path,
         global,
     };

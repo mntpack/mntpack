@@ -12,18 +12,31 @@ pub fn create_shim(
     runtime: &RuntimeContext,
     package_name: &str,
     shim_name: &str,
-    binary_path: &Path,
+    binary_path: Option<&Path>,
 ) -> Result<()> {
-    let relative_binary = binary_path
-        .strip_prefix(&runtime.paths.root)
-        .unwrap_or(binary_path);
+    let relative_binary = binary_path.map(|path| {
+        path.strip_prefix(&runtime.paths.root)
+            .unwrap_or(path)
+            .to_path_buf()
+    });
 
     if cfg!(windows) {
         let shim_path = runtime.paths.bin.join(format!("{shim_name}.cmd"));
-        let relative = relative_binary.to_string_lossy().replace('/', "\\");
+        let fallback = relative_binary
+            .as_ref()
+            .map(|path| {
+                format!(
+                    "\"%{MNTPACK_HOME_ENV}%\\{}\" %*\r\n",
+                    path.to_string_lossy().replace('/', "\\")
+                )
+            })
+            .unwrap_or_else(|| {
+                "echo mntpack: package has no direct binary fallback.>&2\r\nexit /b 1\r\n"
+                    .to_string()
+            });
         let default_root = runtime.paths.root.to_string_lossy();
         let content = format!(
-            "@echo off\r\nset \"{MNTPACK_HOME_ENV}=%{MNTPACK_HOME_ENV}%\"\r\nif \"%{MNTPACK_HOME_ENV}%\"==\"\" set \"{MNTPACK_HOME_ENV}={default_root}\"\r\nset \"MNTPACK_CMD=%{MNTPACK_HOME_ENV}%\\bin\\mntpack.exe\"\r\nif exist \"%MNTPACK_CMD%\" (\r\n  \"%MNTPACK_CMD%\" run \"{package_name}\" %*\r\n) else (\r\n  \"%{MNTPACK_HOME_ENV}%\\{relative}\" %*\r\n)\r\n"
+            "@echo off\r\nset \"{MNTPACK_HOME_ENV}=%{MNTPACK_HOME_ENV}%\"\r\nif \"%{MNTPACK_HOME_ENV}%\"==\"\" set \"{MNTPACK_HOME_ENV}={default_root}\"\r\nset \"MNTPACK_CMD=%{MNTPACK_HOME_ENV}%\\bin\\mntpack.exe\"\r\nif exist \"%MNTPACK_CMD%\" (\r\n  \"%MNTPACK_CMD%\" run \"{package_name}\" %*\r\n) else (\r\n  {fallback})\r\n"
         );
         fs::write(&shim_path, content)
             .with_context(|| format!("failed to write shim {}", shim_path.display()))?;
@@ -31,11 +44,21 @@ pub fn create_shim(
     }
 
     let shim_path = runtime.paths.bin.join(shim_name);
-    let relative = relative_binary.to_string_lossy().replace('\\', "/");
+    let fallback = relative_binary
+        .as_ref()
+        .map(|path| {
+            format!(
+                "exec \"${{{MNTPACK_HOME_ENV}}}/{}\" \"$@\"\n",
+                path.to_string_lossy().replace('\\', "/")
+            )
+        })
+        .unwrap_or_else(|| {
+            "echo \"mntpack: package has no direct binary fallback\" >&2\nexit 1\n".to_string()
+        });
     let default_root = runtime.paths.root.to_string_lossy();
     let content = format!(
-        "#!/bin/sh\n{0}=\"${{{0}:-{1}}}\"\nMNTPACK_CMD=\"${{{0}}}/bin/mntpack\"\nif [ -x \"$MNTPACK_CMD\" ]; then\n  exec \"$MNTPACK_CMD\" run \"{2}\" \"$@\"\nfi\nexec \"${{{0}}}/{3}\" \"$@\"\n",
-        MNTPACK_HOME_ENV, default_root, package_name, relative
+        "#!/bin/sh\n{0}=\"${{{0}:-{1}}}\"\nMNTPACK_CMD=\"${{{0}}}/bin/mntpack\"\nif [ -x \"$MNTPACK_CMD\" ]; then\n  exec \"$MNTPACK_CMD\" run \"{2}\" \"$@\"\nfi\n{3}",
+        MNTPACK_HOME_ENV, default_root, package_name, fallback
     );
     fs::write(&shim_path, content)
         .with_context(|| format!("failed to write shim {}", shim_path.display()))?;

@@ -122,7 +122,8 @@ Supported fields include:
 - `postinstall`
 - `dependencies`
 - `build`
-- `bin`
+- `run` (string command or target map)
+- `bin` (legacy binary path support)
 - `release` (platform asset mapping)
 
 ## Development

@@ -163,9 +163,84 @@ Important config keys:
 - Python: `requirements.txt` or `pyproject.toml`
 - Node: `package.json`
 - C/C++: `CMakeLists.txt` or `Makefile`/`makefile`
-- Generic: fallback with `mntpack.json` build/bin
+- Generic: fallback with `mntpack.json` run/bin
 
-## 10. Troubleshooting
+## 10. `mntpack.json` Guide
+
+`mntpack.json` is optional, but recommended for non-trivial packages.
+
+Common fields:
+
+- `name`
+- `version`
+- `preinstall` (shell command)
+- `postinstall` (shell command)
+- `dependencies` (other mntpack packages)
+- `build` (optional shell command)
+- `run` (command to launch the package)
+- `release` (GitHub release asset map)
+
+### `run` field (recommended)
+
+`run` is command-based and supports:
+
+- one command for all targets:
+
+```json
+{
+  "run": "php asm.php"
+}
+```
+
+- per-target commands:
+
+```json
+{
+  "run": {
+    "windows-x64": "php asm.php",
+    "linux-x64": "php asm.php",
+    "macos-arm64": "php asm.php"
+  }
+}
+```
+
+Supported target keys:
+
+- `windows-x64`
+- `windows-x86`
+- `linux-x64`
+- `linux-arm64`
+- `macos-x64`
+- `macos-arm64`
+
+### `build` is optional
+
+If your package does not need a build step, you can omit `build`.
+
+Example generic package:
+
+```json
+{
+  "name": "php-asm",
+  "run": "php asm.php"
+}
+```
+
+Example with optional build:
+
+```json
+{
+  "name": "tool",
+  "build": "npm run build",
+  "run": "node dist/index.js"
+}
+```
+
+### Legacy `bin`
+
+`bin` path is still accepted for binary-style installs, but `run` is preferred for command-driven launchers.
+
+## 11. Troubleshooting
 
 Check tools:
 
@@ -177,7 +252,7 @@ If a tool is missing, set the matching config path key to the right executable p
 
 If shims are not found in your shell, ensure `<MNTPACK_HOME>/bin` is on PATH and open a new terminal.
 
-## 11. Files and Folders
+## 12. Files and Folders
 
 Default root:
 

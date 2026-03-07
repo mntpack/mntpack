@@ -42,10 +42,16 @@ impl InstallerManager {
 
         for driver in &self.drivers {
             if driver.detect(&ctx.repo_path) {
-                println!("install driver: {}", driver.name());
                 let result = driver.install(ctx, runtime)?;
-                let destination =
-                    materialize_binary(&result.binary_path, &ctx.package_dir, &ctx.package_name)?;
+                let destination = if let Some(binary) = result.binary_path.as_ref() {
+                    Some(materialize_binary(
+                        binary,
+                        &ctx.package_dir,
+                        &ctx.package_name,
+                    )?)
+                } else {
+                    None
+                };
                 return Ok(InstallResult {
                     binary_path: destination,
                     shim_name: result.shim_name,
