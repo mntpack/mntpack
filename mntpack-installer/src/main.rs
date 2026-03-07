@@ -10,6 +10,7 @@ use clap::Parser;
 
 const APP_DIR: &str = ".mntpack";
 const MNTPACK_HOME_ENV: &str = "MNTPACK_HOME";
+const EMBEDDED_MNTPACK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/mntpack_payload.bin"));
 
 #[derive(Debug, Parser)]
 #[command(name = "mntpack-installer", version, about = "Installs mntpack")]
@@ -40,14 +41,13 @@ fn main() -> Result<()> {
 
     let root = install_base.join(APP_DIR);
     let install_paths = ensure_install_layout(&root)?;
-    let source_binary = resolve_source_binary(cli.binary.as_deref())?;
     let target_binary = if cfg!(windows) {
         install_paths.bin.join("mntpack.exe")
     } else {
         install_paths.bin.join("mntpack")
     };
 
-    copy_binary(&source_binary, &target_binary)?;
+    install_binary(cli.binary.as_deref(), &target_binary)?;
     configure_current_process_env(&install_paths.root, &install_paths.bin)?;
     let env_updated = persist_user_environment(&install_paths.root, &install_paths.bin)?;
 
@@ -96,29 +96,30 @@ fn ensure_install_layout(root: &Path) -> Result<InstallPaths> {
     })
 }
 
-fn resolve_source_binary(explicit: Option<&Path>) -> Result<PathBuf> {
-    if let Some(path) = explicit {
-        return Ok(path.to_path_buf());
+fn install_binary(explicit: Option<&Path>, destination: &Path) -> Result<()> {
+    if let Some(source) = explicit {
+        return copy_binary(source, destination);
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::write(destination, EMBEDDED_MNTPACK).with_context(|| {
+        format!(
+            "failed to write embedded mntpack to {}",
+            destination.display()
+        )
+    })?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(destination)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(destination, perms)?;
     }
 
-    let current_exe = env::current_exe().context("failed to locate installer executable")?;
-    let exe_dir = current_exe
-        .parent()
-        .context("installer executable has no parent directory")?;
-    let binary_name = if cfg!(windows) {
-        "mntpack.exe"
-    } else {
-        "mntpack"
-    };
-    let candidate = exe_dir.join(binary_name);
-    if candidate.exists() {
-        return Ok(candidate);
-    }
-
-    anyhow::bail!(
-        "could not find '{}' next to installer; provide --binary <PATH>",
-        binary_name
-    )
+    Ok(())
 }
 
 fn copy_binary(source: &Path, destination: &Path) -> Result<()> {
