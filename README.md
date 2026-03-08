@@ -77,8 +77,8 @@ Installer behavior:
 ## CLI Usage
 
 ```bash
-mntpack sync <repo> [-v <version_or_commit>] [-n <custom_name>] [-g]
-mntpack add <repo> [-v <version_or_commit>] [-n <custom_name>] [-g]
+mntpack sync <repo> [-v <tag_or_commit>] [-r <release_asset_file>] [-n <custom_name>] [-g]
+mntpack add <repo> [-v <tag_or_commit>] [-r <release_asset_file>] [-n <custom_name>] [-g]
 mntpack run <package> [args...]
 mntpack list
 mntpack update [package]
@@ -95,9 +95,15 @@ Examples:
 mntpack sync scalf
 mntpack sync MINTILER-DEV/scalf -g
 mntpack sync https://github.com/user/repo.git -v 1.2.0
+mntpack sync owner/repo -v v1.2.0 -r tool-win64.zip
 mntpack sync owner/repo --name custom-tool
 mntpack run scalf
 ```
+
+`-r/--release` notes:
+
+- selects a specific GitHub release asset filename to download,
+- when used with `-v`, `-v` must be a tag (commit hashes are rejected).
 
 ## Package Naming Rules
 

@@ -15,6 +15,7 @@ pub async fn execute(runtime: &RuntimeContext, package: Option<&str>) -> Result<
                 runtime,
                 &record.repo_spec(),
                 record.version.as_deref(),
+                None,
                 Some(&record.package_name),
                 record.global,
                 &mut visited,
@@ -24,7 +25,7 @@ pub async fn execute(runtime: &RuntimeContext, package: Option<&str>) -> Result<
             return Ok(());
         }
 
-        crate::commands::sync::execute(runtime, package_name, None, None, false).await?;
+        crate::commands::sync::execute(runtime, package_name, None, None, None, false).await?;
         return Ok(());
     }
 
@@ -40,6 +41,7 @@ pub async fn execute(runtime: &RuntimeContext, package: Option<&str>) -> Result<
             runtime,
             &record.repo_spec(),
             record.version.as_deref(),
+            None,
             Some(&record.package_name),
             record.global,
             &mut visited,

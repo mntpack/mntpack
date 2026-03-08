@@ -1,5 +1,16 @@
 # Release Notes
 
+## 0.1.5 - 2026-03-07
+
+### Added
+- `-r` / `--release <asset-file>` for `sync` / `add` to choose an explicit GitHub release asset file.
+
+### Changed
+- Release install flow now supports tag-specific release lookup when `-v <tag>` is used.
+- Validation added:
+  - `-r` cannot be used with `-v` set to a commit hash.
+  - with `-r`, if `-v` is provided, it must resolve as a tag.
+
 ## 0.1.4 - 2026-03-07
 
 ### Added

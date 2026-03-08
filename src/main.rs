@@ -20,11 +20,19 @@ async fn main() -> Result<()> {
         Commands::Sync {
             repo,
             version,
+            release,
             name,
             global,
         } => {
-            commands::sync::execute(&runtime, &repo, version.as_deref(), name.as_deref(), global)
-                .await?
+            commands::sync::execute(
+                &runtime,
+                &repo,
+                version.as_deref(),
+                release.as_deref(),
+                name.as_deref(),
+                global,
+            )
+            .await?
         }
         Commands::Run { package, args } => {
             commands::run::execute(&runtime, &package, &args).await?

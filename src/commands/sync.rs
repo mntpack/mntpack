@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{Result, bail};
 use async_recursion::async_recursion;
+use git2::Repository;
 
 use crate::{
     config::RuntimeContext,
@@ -29,9 +30,12 @@ pub async fn execute(
     runtime: &RuntimeContext,
     repo_input: &str,
     version: Option<&str>,
+    release_asset: Option<&str>,
     custom_name: Option<&str>,
     global: bool,
 ) -> Result<()> {
+    validate_release_version_constraints(version, release_asset)?;
+
     let mut effective_repo_input = repo_input.to_string();
     let mut effective_name = custom_name.map(ToString::to_string);
 
@@ -49,6 +53,7 @@ pub async fn execute(
         runtime,
         &effective_repo_input,
         version,
+        release_asset,
         effective_name.as_deref(),
         global,
         &mut visited,
@@ -63,6 +68,7 @@ pub async fn sync_package_internal(
     runtime: &RuntimeContext,
     repo_input: &str,
     version: Option<&str>,
+    release_asset: Option<&str>,
     custom_name: Option<&str>,
     global: bool,
     visited: &mut HashSet<String>,
@@ -83,6 +89,7 @@ pub async fn sync_package_internal(
     let package_dir = runtime.paths.package_dir(&package_name);
 
     sync_repo(&resolved, &repo_dir, version)?;
+    validate_tag_when_release_selected(&repo_dir, version, release_asset)?;
     let manifest = Manifest::load(&repo_dir)?;
     let bin_command = manifest.as_ref().and_then(|m| m.resolve_bin_command());
     let run_command = manifest
@@ -93,7 +100,7 @@ pub async fn sync_package_internal(
 
     if let Some(manifest) = &manifest {
         for dependency in &manifest.dependencies {
-            sync_package_internal(runtime, dependency, None, None, false, visited).await?;
+            sync_package_internal(runtime, dependency, None, None, None, false, visited).await?;
         }
     }
 
@@ -112,7 +119,8 @@ pub async fn sync_package_internal(
     let (installed_binary, shim_name) = if let Some(manifest) = &manifest {
         if run_command.is_none() {
             if let Some(release_binary) =
-                try_download_release_binary(runtime, &resolved, manifest).await?
+                try_download_release_binary(runtime, &resolved, manifest, version, release_asset)
+                    .await?
             {
                 (
                     Some(materialize_binary(
@@ -252,4 +260,49 @@ fn prompt_for_custom_name(
 
 fn is_simple_identifier(input: &str) -> bool {
     !input.contains('/') && !input.contains("://")
+}
+
+fn validate_release_version_constraints(
+    version: Option<&str>,
+    release_asset: Option<&str>,
+) -> Result<()> {
+    if release_asset.is_none() {
+        return Ok(());
+    }
+    if let Some(version) = version {
+        if looks_like_commit_hash(version) {
+            bail!("-r/--release cannot be used when -v is a commit hash; -v must be a tag");
+        }
+    }
+    Ok(())
+}
+
+fn validate_tag_when_release_selected(
+    repo_dir: &Path,
+    version: Option<&str>,
+    release_asset: Option<&str>,
+) -> Result<()> {
+    if release_asset.is_none() || version.is_none() {
+        return Ok(());
+    }
+    let version = version.unwrap_or_default();
+    if looks_like_commit_hash(version) {
+        bail!("-r/--release cannot be used when -v is a commit hash; -v must be a tag");
+    }
+    let repo = Repository::open(repo_dir)?;
+    let tag_ref = format!("refs/tags/{version}");
+    if repo.find_reference(&tag_ref).is_err() {
+        bail!(
+            "-r/--release with -v requires -v to be a tag; '{version}' is not a tag in this repository"
+        );
+    }
+    Ok(())
+}
+
+fn looks_like_commit_hash(input: &str) -> bool {
+    let len = input.len();
+    if !(7..=40).contains(&len) {
+        return false;
+    }
+    input.chars().all(|c| c.is_ascii_hexdigit())
 }

@@ -22,8 +22,8 @@ The installer:
 ## 2. Core Commands
 
 ```bash
-mntpack sync <repo> [-v <version_or_commit>] [-n <custom_name>] [-g]
-mntpack add <repo> [-v <version_or_commit>] [-n <custom_name>] [-g]
+mntpack sync <repo> [-v <tag_or_commit>] [-r <release_asset_file>] [-n <custom_name>] [-g]
+mntpack add <repo> [-v <tag_or_commit>] [-r <release_asset_file>] [-n <custom_name>] [-g]
 mntpack run <package> [args...]
 mntpack list
 mntpack update [package]
@@ -47,7 +47,14 @@ mntpack sync MINTILER-DEV/scalf
 mntpack sync https://github.com/user/repo.git
 mntpack sync scalf -v 1.2.0
 mntpack sync scalf -v 8f3c2a1
+mntpack add MINTILER-DEV/php-asm -v v1.0.0 -r php-asm-win64.zip
 ```
+
+`-r/--release` behavior:
+
+- chooses an exact release asset filename to download,
+- cannot be used with `-v` set to a commit hash,
+- if `-v` is provided with `-r`, it must be a tag.
 
 ## 4. Package Naming
 
