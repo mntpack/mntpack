@@ -84,7 +84,12 @@ pub async fn sync_package_internal(
 
     sync_repo(&resolved, &repo_dir, version)?;
     let manifest = Manifest::load(&repo_dir)?;
-    let run_command = manifest.as_ref().and_then(|m| m.resolve_run_command());
+    let bin_command = manifest.as_ref().and_then(|m| m.resolve_bin_command());
+    let run_command = manifest
+        .as_ref()
+        .and_then(|m| m.resolve_run_command())
+        .or_else(|| bin_command.as_ref().map(|(_, command)| command.clone()));
+    let preferred_shim_name = bin_command.as_ref().map(|(name, _)| name.clone());
 
     if let Some(manifest) = &manifest {
         for dependency in &manifest.dependencies {
@@ -129,6 +134,7 @@ pub async fn sync_package_internal(
         let result = InstallerManager::new().install(&installer_ctx, &runtime_driver)?;
         (result.binary_path, result.shim_name)
     };
+    let shim_name = preferred_shim_name.unwrap_or(shim_name);
 
     if let Some(script) = manifest.as_ref().and_then(|m| m.postinstall.as_deref()) {
         run_script(script, &repo_dir)?;

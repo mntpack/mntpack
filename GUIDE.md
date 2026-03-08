@@ -23,6 +23,7 @@ The installer:
 
 ```bash
 mntpack sync <repo> [-v <version_or_commit>] [-n <custom_name>] [-g]
+mntpack add <repo> [-v <version_or_commit>] [-n <custom_name>] [-g]
 mntpack run <package> [args...]
 mntpack list
 mntpack update [package]
@@ -41,6 +42,7 @@ Examples:
 
 ```bash
 mntpack sync scalf
+mntpack add MINTILER-DEV/php-asm
 mntpack sync MINTILER-DEV/scalf
 mntpack sync https://github.com/user/repo.git
 mntpack sync scalf -v 1.2.0
@@ -212,6 +214,23 @@ Supported target keys:
 - `linux-arm64`
 - `macos-x64`
 - `macos-arm64`
+
+### `bin` command map (auto binary name)
+
+You can define launcher names and commands directly:
+
+```json
+{
+  "bin": {
+    "phc": "php phc.php"
+  }
+}
+```
+
+In this mode:
+
+- `phc` becomes the launcher/shim command name
+- `"php phc.php"` is used as the run command
 
 ### `build` is optional
 

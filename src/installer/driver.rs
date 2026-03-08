@@ -75,7 +75,7 @@ pub fn manifest_bin(ctx: &InstallContext) -> Result<PathBuf> {
     let Some(manifest) = &ctx.manifest else {
         bail!("mntpack.json is required to determine install binary");
     };
-    let Some(bin) = &manifest.bin else {
+    let Some(bin) = manifest.resolve_bin_path() else {
         bail!("mntpack.json missing required 'bin' field");
     };
     Ok(ctx.repo_path.join(bin))

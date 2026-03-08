@@ -1,5 +1,16 @@
 # Release Notes
 
+## 0.1.4 - 2026-03-07
+
+### Added
+- `add` command alias for `sync` (for example: `mntpack add MINTILER-DEV/php-asm`).
+- `mntpack.json` command-map binary format support:
+  - `"bin": { "phc": "php phc.php" }`
+
+### Changed
+- `bin` command maps now auto-set launcher/shim command names and run commands.
+- Generic driver accepts command-map `bin` definitions and no longer requires a binary path when run-command launching is configured.
+
 ## 0.1.3 - 2026-03-07
 
 ### Added

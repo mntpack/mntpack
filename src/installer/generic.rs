@@ -20,9 +20,11 @@ impl InstallDriver for GenericDriver {
             run_shell_command(build_command, &ctx.repo_path)?;
         }
 
-        let binary = if manifest.bin.is_some() {
+        let binary = if manifest.resolve_bin_path().is_some() {
             Some(manifest_bin(ctx)?)
-        } else if manifest.resolve_run_command().is_some() {
+        } else if manifest.resolve_run_command().is_some()
+            || manifest.resolve_bin_command().is_some()
+        {
             None
         } else {
             bail!("generic installs require either 'run' command or 'bin' path in mntpack.json");

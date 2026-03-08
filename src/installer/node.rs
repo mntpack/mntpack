@@ -18,7 +18,12 @@ impl InstallDriver for NodeDriver {
             &ctx.repo_path,
         )?;
 
-        let binary = if ctx.manifest.as_ref().and_then(|m| m.bin.as_ref()).is_some() {
+        let binary = if ctx
+            .manifest
+            .as_ref()
+            .and_then(|m| m.resolve_bin_path())
+            .is_some()
+        {
             Some(manifest_bin(ctx)?)
         } else {
             None

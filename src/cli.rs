@@ -9,6 +9,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    #[command(alias = "add")]
     Sync {
         repo: String,
         #[arg(short = 'v', long = "version")]

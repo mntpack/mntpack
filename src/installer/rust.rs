@@ -21,7 +21,12 @@ impl InstallDriver for RustDriver {
             &ctx.repo_path,
         )?;
 
-        if ctx.manifest.as_ref().and_then(|m| m.bin.as_ref()).is_some() {
+        if ctx
+            .manifest
+            .as_ref()
+            .and_then(|m| m.resolve_bin_path())
+            .is_some()
+        {
             let bin = manifest_bin(ctx)?;
             return Ok(InstallResult {
                 shim_name: infer_shim_name(&bin, &ctx.package_name),

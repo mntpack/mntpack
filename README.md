@@ -78,6 +78,7 @@ Installer behavior:
 
 ```bash
 mntpack sync <repo> [-v <version_or_commit>] [-n <custom_name>] [-g]
+mntpack add <repo> [-v <version_or_commit>] [-n <custom_name>] [-g]
 mntpack run <package> [args...]
 mntpack list
 mntpack update [package]
@@ -123,7 +124,7 @@ Supported fields include:
 - `dependencies`
 - `build`
 - `run` (string command or target map)
-- `bin` (legacy binary path support)
+- `bin` (legacy binary path or command map like `{ "tool": "php tool.php" }`)
 - `release` (platform asset mapping)
 
 ## Development

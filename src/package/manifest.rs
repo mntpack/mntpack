@@ -18,6 +18,13 @@ pub enum RunConfig {
     PerTarget(HashMap<String, String>),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BinConfig {
+    Path(String),
+    Commands(HashMap<String, String>),
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Manifest {
     pub name: Option<String>,
@@ -27,7 +34,7 @@ pub struct Manifest {
     #[serde(default)]
     pub dependencies: Vec<String>,
     pub build: Option<String>,
-    pub bin: Option<String>,
+    pub bin: Option<BinConfig>,
     pub run: Option<RunConfig>,
     #[serde(default)]
     pub release: HashMap<String, ReleaseAssetConfig>,
@@ -52,6 +59,27 @@ impl Manifest {
         match run {
             RunConfig::Single(command) => Some(command.clone()),
             RunConfig::PerTarget(targets) => targets.get(current_target()).cloned(),
+        }
+    }
+
+    pub fn resolve_bin_path(&self) -> Option<String> {
+        match self.bin.as_ref()? {
+            BinConfig::Path(path) => Some(path.clone()),
+            BinConfig::Commands(_) => None,
+        }
+    }
+
+    pub fn resolve_bin_command(&self) -> Option<(String, String)> {
+        match self.bin.as_ref()? {
+            BinConfig::Path(_) => None,
+            BinConfig::Commands(commands) => {
+                let mut entries: Vec<(&String, &String)> = commands.iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+                entries
+                    .into_iter()
+                    .next()
+                    .map(|(name, command)| (name.clone(), command.clone()))
+            }
         }
     }
 }
