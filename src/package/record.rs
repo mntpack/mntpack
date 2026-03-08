@@ -12,8 +12,18 @@ pub struct PackageRecord {
     pub owner: String,
     pub repo: String,
     pub version: Option<String>,
+    #[serde(default)]
+    pub commit: Option<String>,
     pub binary_rel_path: Option<String>,
+    #[serde(default)]
+    pub binary_path: Option<String>,
     pub run_command: Option<String>,
+    #[serde(default)]
+    pub shim_name: Option<String>,
+    #[serde(default)]
+    pub store_entry: Option<String>,
+    #[serde(default)]
+    pub build_pending: bool,
     pub global: bool,
 }
 

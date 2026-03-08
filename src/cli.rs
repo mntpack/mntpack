@@ -25,6 +25,22 @@ pub enum Commands {
     Remove {
         repo: String,
     },
+    Info {
+        package: String,
+    },
+    Outdated,
+    Clean {
+        #[arg(long = "repos")]
+        repos: bool,
+    },
+    Exec {
+        repo: String,
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    Which {
+        command: String,
+    },
     Run {
         package: String,
         #[arg(trailing_var_arg = true)]

@@ -37,7 +37,10 @@ By default `mntpack` uses:
   config.json
   repos/
   packages/
+  store/
   cache/
+    git/
+    exec/
   bin/
 ```
 
@@ -83,6 +86,11 @@ mntpack remove <repo_or_package>
 mntpack uninstall <repo_or_package>
 mntpack rm <repo_or_package>
 mntpack unsync <repo_or_package>
+mntpack info <package>
+mntpack which <command>
+mntpack outdated
+mntpack clean [--repos]
+mntpack exec <repo> [args...]
 mntpack run <package> [args...]
 mntpack list
 mntpack update [package]
@@ -102,6 +110,11 @@ mntpack sync https://github.com/user/repo.git -v 1.2.0
 mntpack sync owner/repo -v v1.2.0 -r tool-win64.zip
 mntpack sync owner/repo --name custom-tool
 mntpack rm custom-tool
+mntpack info custom-tool
+mntpack which phc
+mntpack outdated
+mntpack clean --repos
+mntpack exec MINTILER-DEV/php-asm compile test.php
 mntpack run scalf
 ```
 
@@ -122,7 +135,16 @@ mntpack run scalf
 - Shims are placed in `<MNTPACK_HOME>/bin` (or `~/.mntpack/bin`)
 - Rust projects use the Rust executable name for shim name when globally installed
 - Shim target paths resolve from `MNTPACK_HOME`
-- Shims try `mntpack run <package>` first (enables auto-update-on-run behavior), then fall back to direct binary execution
+- Shims now check `autoUpdateOnRun` from `config.json`
+- If `autoUpdateOnRun` is `true`, shims route through `mntpack run <package>`
+- If `autoUpdateOnRun` is `false`, shims execute package binaries directly when available
+
+## Store And Lazy Build
+
+- Binaries are shared in `<MNTPACK_HOME>/store` and package folders link to them.
+- `sync` is clone-first and marks packages for lazy preparation/build when needed.
+- `run` prepares/builds packages on-demand when artifacts are missing.
+- Git mirror cache is kept under `<MNTPACK_HOME>/cache/git`.
 
 ## Manifest (`mntpack.json`)
 

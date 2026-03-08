@@ -1,7 +1,12 @@
+pub mod clean;
 pub mod config;
 pub mod doctor;
+pub mod exec;
+pub mod info;
 pub mod list;
+pub mod outdated;
 pub mod remove;
 pub mod run;
 pub mod sync;
 pub mod update;
+pub mod which;

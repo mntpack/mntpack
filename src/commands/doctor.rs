@@ -8,6 +8,8 @@ pub fn execute(runtime: &RuntimeContext) -> Result<()> {
     println!("root\t{}", runtime.paths.root.display());
     println!("config\t{}", runtime.paths.config.display());
     println!("bin\t{}", runtime.paths.bin.display());
+    println!("store\t{}", runtime.paths.store.display());
+    println!("cache\t{}", runtime.paths.cache.display());
 
     let checks = [
         ("git", runtime.config.paths.git.as_str()),

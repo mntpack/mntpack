@@ -73,9 +73,21 @@ fn remove_installed_package(runtime: &RuntimeContext, record: &PackageRecord) ->
 fn remove_global_shims(runtime: &RuntimeContext, record: &PackageRecord) -> Result<()> {
     let mut removed_paths = HashSet::<PathBuf>::new();
     let mut shim_names = vec![record.package_name.clone()];
+    if let Some(shim_name) = record.shim_name.as_deref() {
+        shim_names.push(shim_name.to_string());
+    }
 
     if let Some(binary_rel_path) = record.binary_rel_path.as_deref() {
         if let Some(stem) = Path::new(binary_rel_path)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.trim().is_empty())
+        {
+            shim_names.push(stem.to_string());
+        }
+    }
+    if let Some(binary_path) = record.binary_path.as_deref() {
+        if let Some(stem) = Path::new(binary_path)
             .file_stem()
             .and_then(|value| value.to_str())
             .filter(|value| !value.trim().is_empty())
@@ -154,6 +166,24 @@ fn cleanup_repo_directories(runtime: &RuntimeContext, removed: &[PackageRecord])
                     .with_context(|| format!("failed to remove {}", repo_dir.display()))?;
             }
             repo_keys.remove(&repo_key);
+        }
+    }
+
+    let remaining_store_entries: HashSet<String> = remaining
+        .iter()
+        .filter_map(|record| record.store_entry.clone())
+        .collect();
+    for record in removed {
+        let Some(store_entry) = record.store_entry.as_deref() else {
+            continue;
+        };
+        if remaining_store_entries.contains(store_entry) {
+            continue;
+        }
+        let store_path = runtime.paths.store.join(store_entry);
+        if store_path.exists() {
+            fs::remove_dir_all(&store_path)
+                .with_context(|| format!("failed to remove {}", store_path.display()))?;
         }
     }
 

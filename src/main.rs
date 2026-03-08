@@ -35,6 +35,11 @@ async fn main() -> Result<()> {
             .await?
         }
         Commands::Remove { repo } => commands::remove::execute(&runtime, &repo)?,
+        Commands::Info { package } => commands::info::execute(&runtime, &package)?,
+        Commands::Outdated => commands::outdated::execute(&runtime)?,
+        Commands::Clean { repos } => commands::clean::execute(&runtime, repos)?,
+        Commands::Exec { repo, args } => commands::exec::execute(&runtime, &repo, &args).await?,
+        Commands::Which { command } => commands::which::execute(&runtime, &command)?,
         Commands::Run { package, args } => {
             commands::run::execute(&runtime, &package, &args).await?
         }

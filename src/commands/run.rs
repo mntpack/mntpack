@@ -28,21 +28,20 @@ pub async fn execute(runtime: &RuntimeContext, package_name: &str, args: &[Strin
         }
     }
 
-    let Some(record) = load_record(&package_dir)? else {
-        bail!("package metadata for '{package_name}' is missing");
-    };
+    let record = crate::commands::sync::ensure_package_ready(runtime, package_name).await?;
 
     if let Some(run_command) = record.run_command.as_deref() {
         return execute_run_command(runtime, &record, run_command, args);
     }
 
-    let binary_path = if let Some(binary_rel_path) = record.binary_rel_path.as_deref() {
-        package_dir.join(binary_rel_path)
-    } else if cfg!(windows) {
-        package_dir.join(format!("{package_name}.exe"))
-    } else {
-        package_dir.join(package_name)
-    };
+    let binary_path =
+        crate::commands::sync::resolve_binary_path(runtime, &record).unwrap_or_else(|| {
+            if cfg!(windows) {
+                package_dir.join(format!("{package_name}.exe"))
+            } else {
+                package_dir.join(package_name)
+            }
+        });
 
     if !binary_path.exists() {
         bail!(

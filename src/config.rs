@@ -68,6 +68,9 @@ pub struct AppPaths {
     pub repos: PathBuf,
     pub packages: PathBuf,
     pub cache: PathBuf,
+    pub cache_git: PathBuf,
+    pub cache_exec: PathBuf,
+    pub store: PathBuf,
     pub bin: PathBuf,
 }
 
@@ -94,9 +97,21 @@ impl RuntimeContext {
         let repos = root.join("repos");
         let packages = root.join("packages");
         let cache = root.join("cache");
+        let cache_git = cache.join("git");
+        let cache_exec = cache.join("exec");
+        let store = root.join("store");
         let bin = root.join("bin");
 
-        for dir in [&root, &repos, &packages, &cache, &bin] {
+        for dir in [
+            &root,
+            &repos,
+            &packages,
+            &cache,
+            &cache_git,
+            &cache_exec,
+            &store,
+            &bin,
+        ] {
             fs::create_dir_all(dir)
                 .with_context(|| format!("failed to create directory {}", dir.display()))?;
         }
@@ -122,6 +137,9 @@ impl RuntimeContext {
                 repos,
                 packages,
                 cache,
+                cache_git,
+                cache_exec,
+                store,
                 bin,
             },
         })

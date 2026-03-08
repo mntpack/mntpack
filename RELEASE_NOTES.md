@@ -1,5 +1,31 @@
 # Release Notes
 
+## 0.2.0 - 2026-03-08
+
+### Added
+- New commands:
+  - `info <package>`
+  - `outdated`
+  - `clean [--repos]`
+  - `exec <repo> [args...]`
+  - `which <command>`
+- New runtime paths:
+  - `<MNTPACK_HOME>/store`
+  - `<MNTPACK_HOME>/cache/git`
+  - `<MNTPACK_HOME>/cache/exec`
+
+### Changed
+- Sync pipeline now uses bare git mirror cache under `cache/git` before updating working repos.
+- Lazy package preparation/build flow:
+  - `sync` now clone-syncs and records pending preparation when needed.
+  - `run` prepares/builds on demand when artifacts are missing.
+- Installed binaries are now persisted in shared `store` entries, and package payload paths link back to store content.
+- Shims now inspect `autoUpdateOnRun`:
+  - if enabled, route through `mntpack run <package>`
+  - otherwise prefer direct binary execution.
+- Remove/uninstall now cleans unused store entries for removed packages.
+- Dependency syncs are executed in parallel task workers.
+
 ## 0.1.6 - 2026-03-08
 
 ### Added

@@ -22,21 +22,22 @@ pub fn create_shim(
 
     if cfg!(windows) {
         let shim_path = runtime.paths.bin.join(format!("{shim_name}.cmd"));
-        let fallback = relative_binary
+        let direct_command = relative_binary
             .as_ref()
             .map(|path| {
                 format!(
-                    "\"%{MNTPACK_HOME_ENV}%\\{}\" %*\r\n",
+                    "\"%{MNTPACK_HOME_ENV}%\\{}\" %*\r\nexit /b %errorlevel%\r\n",
                     path.to_string_lossy().replace('/', "\\")
                 )
             })
             .unwrap_or_else(|| {
-                "echo mntpack: package has no direct binary fallback.>&2\r\nexit /b 1\r\n"
-                    .to_string()
+                format!(
+                    "if exist \"%MNTPACK_CMD%\" (\r\n  \"%MNTPACK_CMD%\" run \"{package_name}\" %*\r\n  exit /b %errorlevel%\r\n)\r\necho mntpack: package has no direct binary fallback.>&2\r\nexit /b 1\r\n"
+                )
             });
         let default_root = runtime.paths.root.to_string_lossy();
         let content = format!(
-            "@echo off\r\nset \"{MNTPACK_HOME_ENV}=%{MNTPACK_HOME_ENV}%\"\r\nif \"%{MNTPACK_HOME_ENV}%\"==\"\" set \"{MNTPACK_HOME_ENV}={default_root}\"\r\nset \"MNTPACK_CMD=%{MNTPACK_HOME_ENV}%\\bin\\mntpack.exe\"\r\nif exist \"%MNTPACK_CMD%\" (\r\n  \"%MNTPACK_CMD%\" run \"{package_name}\" %*\r\n) else (\r\n  {fallback})\r\n"
+            "@echo off\r\nset \"{MNTPACK_HOME_ENV}=%{MNTPACK_HOME_ENV}%\"\r\nif \"%{MNTPACK_HOME_ENV}%\"==\"\" set \"{MNTPACK_HOME_ENV}={default_root}\"\r\nset \"MNTPACK_CMD=%{MNTPACK_HOME_ENV}%\\bin\\mntpack.exe\"\r\nset \"MNTPACK_CONFIG=%{MNTPACK_HOME_ENV}%\\config.json\"\r\nset \"MNTPACK_AUTO_UPDATE=0\"\r\nif exist \"%MNTPACK_CONFIG%\" (\r\n  findstr /R /I /C:\"\\\"autoUpdateOnRun\\\"[ ]*:[ ]*true\" \"%MNTPACK_CONFIG%\" >nul\r\n  if not errorlevel 1 set \"MNTPACK_AUTO_UPDATE=1\"\r\n)\r\nif \"%MNTPACK_AUTO_UPDATE%\"==\"1\" (\r\n  if exist \"%MNTPACK_CMD%\" (\r\n    \"%MNTPACK_CMD%\" run \"{package_name}\" %*\r\n    exit /b %errorlevel%\r\n  )\r\n)\r\n{direct_command}"
         );
         fs::write(&shim_path, content)
             .with_context(|| format!("failed to write shim {}", shim_path.display()))?;
@@ -44,7 +45,7 @@ pub fn create_shim(
     }
 
     let shim_path = runtime.paths.bin.join(shim_name);
-    let fallback = relative_binary
+    let direct_command = relative_binary
         .as_ref()
         .map(|path| {
             format!(
@@ -53,12 +54,14 @@ pub fn create_shim(
             )
         })
         .unwrap_or_else(|| {
-            "echo \"mntpack: package has no direct binary fallback\" >&2\nexit 1\n".to_string()
+            format!(
+                "if [ -x \"$MNTPACK_CMD\" ]; then\n  exec \"$MNTPACK_CMD\" run \"{package_name}\" \"$@\"\nfi\necho \"mntpack: package has no direct binary fallback\" >&2\nexit 1\n"
+            )
         });
     let default_root = runtime.paths.root.to_string_lossy();
     let content = format!(
-        "#!/bin/sh\n{0}=\"${{{0}:-{1}}}\"\nMNTPACK_CMD=\"${{{0}}}/bin/mntpack\"\nif [ -x \"$MNTPACK_CMD\" ]; then\n  exec \"$MNTPACK_CMD\" run \"{2}\" \"$@\"\nfi\n{3}",
-        MNTPACK_HOME_ENV, default_root, package_name, fallback
+        "#!/bin/sh\n{0}=\"${{{0}:-{1}}}\"\nMNTPACK_CMD=\"${{{0}}}/bin/mntpack\"\nMNTPACK_CONFIG=\"${{{0}}}/config.json\"\nif [ -f \"$MNTPACK_CONFIG\" ] && grep -Eq '\"autoUpdateOnRun\"[[:space:]]*:[[:space:]]*true' \"$MNTPACK_CONFIG\" 2>/dev/null; then\n  if [ -x \"$MNTPACK_CMD\" ]; then\n    exec \"$MNTPACK_CMD\" run \"{2}\" \"$@\"\n  fi\nfi\n{3}",
+        MNTPACK_HOME_ENV, default_root, package_name, direct_command
     );
     fs::write(&shim_path, content)
         .with_context(|| format!("failed to write shim {}", shim_path.display()))?;

@@ -8,9 +8,17 @@ use git2::{
 
 use crate::package::resolver::ResolvedRepo;
 
-pub fn sync_repo(resolved: &ResolvedRepo, repo_dir: &Path, version: Option<&str>) -> Result<()> {
+pub fn sync_repo(
+    resolved: &ResolvedRepo,
+    repo_dir: &Path,
+    cache_git_dir: &Path,
+    version: Option<&str>,
+) -> Result<()> {
+    let mirror_dir = ensure_bare_mirror(resolved, cache_git_dir)?;
     if !repo_dir.exists() {
-        clone_repo(&resolved.clone_url, repo_dir)?;
+        clone_repo(mirror_dir.to_string_lossy().as_ref(), repo_dir)?;
+    } else {
+        fetch_repo(repo_dir)?;
     }
 
     let operation = if let Some(reference) = version {
@@ -23,7 +31,7 @@ pub fn sync_repo(resolved: &ResolvedRepo, repo_dir: &Path, version: Option<&str>
         eprintln!("sync failed for {}: {err}. recloning...", resolved.key);
         fs::remove_dir_all(repo_dir)
             .with_context(|| format!("failed to remove repo dir {}", repo_dir.display()))?;
-        clone_repo(&resolved.clone_url, repo_dir)?;
+        clone_repo(mirror_dir.to_string_lossy().as_ref(), repo_dir)?;
         if let Some(reference) = version {
             checkout_version(repo_dir, reference)?;
         } else {
@@ -31,6 +39,38 @@ pub fn sync_repo(resolved: &ResolvedRepo, repo_dir: &Path, version: Option<&str>
         }
     }
 
+    Ok(())
+}
+
+fn ensure_bare_mirror(resolved: &ResolvedRepo, cache_git_dir: &Path) -> Result<std::path::PathBuf> {
+    fs::create_dir_all(cache_git_dir)
+        .with_context(|| format!("failed to create {}", cache_git_dir.display()))?;
+    let mirror_dir = cache_git_dir.join(format!("{}.git", resolved.key));
+
+    if !mirror_dir.exists() {
+        clone_bare_repo(&resolved.clone_url, &mirror_dir)?;
+        return Ok(mirror_dir);
+    }
+
+    let mirror = Repository::open_bare(&mirror_dir)
+        .with_context(|| format!("failed to open mirror {}", mirror_dir.display()))?;
+    fetch_all(&mirror)?;
+    Ok(mirror_dir)
+}
+
+fn clone_bare_repo(clone_url: &str, repo_dir: &Path) -> Result<()> {
+    if let Some(parent) = repo_dir.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.bare(true);
+    builder.clone(clone_url, repo_dir).with_context(|| {
+        format!(
+            "failed to create mirror {clone_url} into {}",
+            repo_dir.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -45,8 +85,7 @@ fn clone_repo(clone_url: &str, repo_dir: &Path) -> Result<()> {
 }
 
 fn sync_default_branch(repo_dir: &Path) -> Result<()> {
-    let repo = Repository::open(repo_dir)
-        .with_context(|| format!("failed to open repository {}", repo_dir.display()))?;
+    let repo = open_repo(repo_dir)?;
     fetch_all(&repo)?;
 
     let default_branch = resolve_default_branch(&repo)?;
@@ -81,8 +120,7 @@ fn sync_default_branch(repo_dir: &Path) -> Result<()> {
 }
 
 pub fn checkout_version(repo_dir: &Path, version: &str) -> Result<()> {
-    let repo = Repository::open(repo_dir)
-        .with_context(|| format!("failed to open repository {}", repo_dir.display()))?;
+    let repo = open_repo(repo_dir)?;
 
     fetch_all(&repo)?;
     let (object, reference) = resolve_version(&repo, version)?;
@@ -111,6 +149,42 @@ pub fn checkout_version(repo_dir: &Path, version: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn fetch_repo(repo_dir: &Path) -> Result<()> {
+    let repo = open_repo(repo_dir)?;
+    fetch_all(&repo)
+}
+
+pub fn head_commit(repo_dir: &Path) -> Result<String> {
+    let repo = open_repo(repo_dir)?;
+    let oid = repo
+        .head()
+        .context("failed to read HEAD")?
+        .target()
+        .context("failed to resolve HEAD target")?;
+    Ok(oid.to_string())
+}
+
+pub fn head_commit_short(repo_dir: &Path) -> Result<String> {
+    let commit = head_commit(repo_dir)?;
+    Ok(short_commit(&commit))
+}
+
+pub fn default_remote_commit(repo_dir: &Path) -> Result<String> {
+    let repo = open_repo(repo_dir)?;
+    fetch_all(&repo)?;
+    let branch = resolve_default_branch(&repo)?;
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let oid = repo
+        .refname_to_id(&remote_ref)
+        .with_context(|| format!("failed to resolve {remote_ref}"))?;
+    Ok(oid.to_string())
+}
+
+pub fn default_remote_commit_short(repo_dir: &Path) -> Result<String> {
+    let commit = default_remote_commit(repo_dir)?;
+    Ok(short_commit(&commit))
+}
+
 fn fetch_all(repo: &Repository) -> Result<()> {
     let mut cb = RemoteCallbacks::new();
     cb.credentials(|_url, _username, _allowed| git2::Cred::default());
@@ -132,6 +206,11 @@ fn fetch_all(repo: &Repository) -> Result<()> {
         )
         .context("failed to fetch refs from origin")?;
     Ok(())
+}
+
+fn open_repo(repo_dir: &Path) -> Result<Repository> {
+    Repository::open(repo_dir)
+        .with_context(|| format!("failed to open repository {}", repo_dir.display()))
 }
 
 fn resolve_default_branch(repo: &Repository) -> Result<String> {
@@ -160,6 +239,10 @@ fn resolve_default_branch(repo: &Repository) -> Result<String> {
         bail!("origin default branch is empty");
     }
     Ok(branch)
+}
+
+fn short_commit(commit: &str) -> String {
+    commit.chars().take(7).collect()
 }
 
 fn resolve_version<'repo>(

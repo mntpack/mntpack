@@ -28,6 +28,11 @@ mntpack remove <repo_or_package>
 mntpack uninstall <repo_or_package>
 mntpack rm <repo_or_package>
 mntpack unsync <repo_or_package>
+mntpack info <package>
+mntpack which <command>
+mntpack outdated
+mntpack clean [--repos]
+mntpack exec <repo> [args...]
 mntpack run <package> [args...]
 mntpack list
 mntpack update [package]
@@ -124,8 +129,51 @@ mntpack run mytool -- --flag value
 ```
 
 If `autoUpdateOnRun` is enabled, `run` syncs before launching.
+If build/install artifacts are pending, `run` prepares them on-demand (lazy build).
 
-## 8. Global Shims
+## 8. Package Introspection
+
+Package details:
+
+```bash
+mntpack info mytool
+```
+
+Find which package provides a command:
+
+```bash
+mntpack which phc
+```
+
+Check for newer upstream commits:
+
+```bash
+mntpack outdated
+```
+
+## 9. Cleaning Cache
+
+Clear cache:
+
+```bash
+mntpack clean
+```
+
+Also remove repo clones not used by installed packages:
+
+```bash
+mntpack clean --repos
+```
+
+## 10. Ephemeral Exec
+
+Run a repository without a global install:
+
+```bash
+mntpack exec MINTILER-DEV/php-asm compile test.php
+```
+
+## 11. Global Shims
 
 Use `-g` to create a global shim:
 
@@ -142,7 +190,7 @@ Notes:
 - Rust projects use their Rust executable name for global shim naming.
 - Shims call `mntpack run <package>` when possible, so auto-update-on-run applies there too.
 
-## 9. Config
+## 12. Config
 
 Show full config:
 
@@ -185,7 +233,7 @@ Important config keys:
 - `paths.cmake`
 - `paths.make`
 
-## 10. Project Type Detection
+## 13. Project Type Detection
 
 `mntpack` uses installer drivers:
 
@@ -195,7 +243,7 @@ Important config keys:
 - C/C++: `CMakeLists.txt` or `Makefile`/`makefile`
 - Generic: fallback with `mntpack.json` run/bin
 
-## 11. `mntpack.json` Guide
+## 14. `mntpack.json` Guide
 
 `mntpack.json` is optional, but recommended for non-trivial packages.
 
@@ -287,7 +335,7 @@ Example with optional build:
 
 `bin` path is still accepted for binary-style installs, but `run` is preferred for command-driven launchers.
 
-## 12. Troubleshooting
+## 15. Troubleshooting
 
 Check tools:
 
@@ -299,7 +347,7 @@ If a tool is missing, set the matching config path key to the right executable p
 
 If shims are not found in your shell, ensure `<MNTPACK_HOME>/bin` is on PATH and open a new terminal.
 
-## 13. Files and Folders
+## 16. Files and Folders
 
 Default root:
 
@@ -313,6 +361,9 @@ Structure:
 config.json
 repos/
 packages/
+store/
 cache/
+cache/git/
+cache/exec/
 bin/
 ```
