@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.3.5 - 2026-03-08
+
+### Fixed
+- Fixed Windows `os error 32` during `mntpack sync mntpack -g` / `mntpack update` when the running `mntpack` executable is already loaded from the managed store path.
+- Managed `mntpack` overwrite behavior now only force-overwrites store binaries when running from a non-store executable (for example `cargo run --release`), avoiding attempts to overwrite the currently running locked binary.
+
 ## 0.3.4 - 2026-03-08
 
 ### Changed

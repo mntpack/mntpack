@@ -412,7 +412,15 @@ fn persist_binary_to_store(
         .map(|name| name.to_string())
         .unwrap_or(fallback_name);
     let stored_binary = store_dir.join(&file_name);
-    let should_overwrite = package_name.eq_ignore_ascii_case(SPECIAL_PACKAGE_NAME);
+    let should_overwrite = if package_name.eq_ignore_ascii_case(SPECIAL_PACKAGE_NAME) {
+        let running_from_store = std::env::current_exe()
+            .ok()
+            .map(|exe| exe.starts_with(&runtime.paths.store))
+            .unwrap_or(false);
+        !running_from_store
+    } else {
+        false
+    };
     if should_overwrite || !stored_binary.exists() {
         fs::copy(source_binary, &stored_binary).with_context(|| {
             format!(
