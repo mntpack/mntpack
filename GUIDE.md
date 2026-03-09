@@ -19,6 +19,7 @@ The installer:
 - installs `mntpack` as package `packages/mntpack`,
 - stores mntpack payload in `store/mntpack/<commit-or-payload-id>`,
 - creates `mntpack` shim in `.mntpack/bin`,
+- runs a post-install managed self-sync for latest `MINTILER-DEV/mntpack`,
 - sets PATH and `MNTPACK_HOME`.
 
 ## 2. Core Commands

@@ -73,12 +73,19 @@ fn main() -> Result<()> {
         false
     };
 
-    let binary_path = if installed_via_existing {
+    let mut binary_path = if installed_via_existing {
         println!("used existing mntpack to sync the managed mntpack package");
         package_binary_path(&install_paths.root, &install_paths.packages)?
     } else {
         install_embedded_as_package(&install_paths, cli.binary.as_deref())?
     };
+
+    let post_sync_ok = sync_with_installed_mntpack(&binary_path, &install_paths.root)?;
+    if post_sync_ok {
+        if let Ok(updated_binary) = package_binary_path(&install_paths.root, &install_paths.packages) {
+            binary_path = updated_binary;
+        }
+    }
 
     let env_updated = persist_user_environment(&install_paths.root, &install_paths.bin)?;
 
@@ -279,6 +286,27 @@ fn try_sync_with_existing_mntpack(root: &Path) -> Result<bool> {
         Ok(_) => Ok(false),
         Err(_) => Ok(false),
     }
+}
+
+fn sync_with_installed_mntpack(binary_path: &Path, root: &Path) -> Result<bool> {
+    let status = Command::new(binary_path)
+        .args(["sync", "MINTILER-DEV/mntpack", "--name", "mntpack", "-g"])
+        .env(MNTPACK_HOME_ENV, root)
+        .status()
+        .with_context(|| {
+            format!(
+                "failed to run managed mntpack self-sync using {}",
+                binary_path.display()
+            )
+        })?;
+    if status.success() {
+        return Ok(true);
+    }
+    eprintln!(
+        "warning: post-install mntpack sync failed (exit code {:?})",
+        status.code()
+    );
+    Ok(false)
 }
 
 fn remove_path(path: &Path) -> Result<()> {

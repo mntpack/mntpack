@@ -76,6 +76,7 @@ Installer behavior:
 - Installs `mntpack` as managed package `packages/mntpack`
 - Places payload in `store/mntpack/<commit-or-payload-id>`
 - Creates `mntpack` shim in `.mntpack/bin`
+- Runs a post-install managed self-sync (`sync MINTILER-DEV/mntpack --name mntpack -g`)
 - Adds `.mntpack/bin` to PATH (if missing)
 - Sets `MNTPACK_HOME` for custom install root support
 

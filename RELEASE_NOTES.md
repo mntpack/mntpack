@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.3.4 - 2026-03-08
+
+### Changed
+- Installer now always performs a post-install managed self-sync:
+  - runs `sync MINTILER-DEV/mntpack --name mntpack -g` using the installed `mntpack` binary.
+- After post-install sync, installer refreshes resolved managed binary path from `packages/mntpack/install.json`.
+- Post-install sync is best-effort; installer warns on sync failure instead of aborting installation.
+
 ## 0.3.3 - 2026-03-08
 
 ### Fixed
