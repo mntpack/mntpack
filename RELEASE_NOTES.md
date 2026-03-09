@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.3.1 - 2026-03-08
+
+### Fixed
+- Fixed Windows shim recursion for managed `mntpack` installs where `bin/mntpack.cmd` could recursively invoke itself (`run mntpack`) and hang/lock the terminal.
+- `mntpack` shim generation now uses a dedicated non-recursive launcher that directly executes the managed payload binary path.
+
 ## 0.3.0 - 2026-03-08
 
 ### Changed

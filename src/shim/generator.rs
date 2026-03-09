@@ -20,6 +20,10 @@ pub fn create_shim(
             .to_path_buf()
     });
 
+    if package_name.eq_ignore_ascii_case("mntpack") {
+        return create_mntpack_shim(runtime, shim_name, relative_binary.as_ref());
+    }
+
     if cfg!(windows) {
         let shim_path = runtime.paths.bin.join(format!("{shim_name}.cmd"));
         let direct_command = relative_binary
@@ -62,6 +66,48 @@ pub fn create_shim(
     let content = format!(
         "#!/bin/sh\n{0}=\"${{{0}:-{1}}}\"\nMNTPACK_CMD=\"${{{0}}}/bin/mntpack\"\nMNTPACK_CONFIG=\"${{{0}}}/config.json\"\nif [ -f \"$MNTPACK_CONFIG\" ] && grep -Eq '\"autoUpdateOnRun\"[[:space:]]*:[[:space:]]*true' \"$MNTPACK_CONFIG\" 2>/dev/null; then\n  if [ -x \"$MNTPACK_CMD\" ]; then\n    exec \"$MNTPACK_CMD\" run \"{2}\" \"$@\"\n  fi\nfi\n{3}",
         MNTPACK_HOME_ENV, default_root, package_name, direct_command
+    );
+    fs::write(&shim_path, content)
+        .with_context(|| format!("failed to write shim {}", shim_path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&shim_path)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&shim_path, perms)?;
+    }
+
+    Ok(())
+}
+
+fn create_mntpack_shim(
+    runtime: &RuntimeContext,
+    shim_name: &str,
+    relative_binary: Option<&PathBuf>,
+) -> Result<()> {
+    if cfg!(windows) {
+        let shim_path = runtime.paths.bin.join(format!("{shim_name}.cmd"));
+        let default_target = "packages\\mntpack\\payload\\mntpack.exe".to_string();
+        let target = relative_binary
+            .map(|path| path.to_string_lossy().replace('/', "\\"))
+            .unwrap_or(default_target);
+        let default_root = runtime.paths.root.to_string_lossy();
+        let content = format!(
+            "@echo off\r\nset \"{MNTPACK_HOME_ENV}=%{MNTPACK_HOME_ENV}%\"\r\nif \"%{MNTPACK_HOME_ENV}%\"==\"\" set \"{MNTPACK_HOME_ENV}={default_root}\"\r\nset \"MNTPACK_SELF=%{MNTPACK_HOME_ENV}%\\{target}\"\r\nif exist \"%MNTPACK_SELF%\" (\r\n  \"%MNTPACK_SELF%\" %*\r\n  exit /b %errorlevel%\r\n)\r\necho mntpack: managed binary not found at %MNTPACK_SELF%.>&2\r\nexit /b 1\r\n"
+        );
+        fs::write(&shim_path, content)
+            .with_context(|| format!("failed to write shim {}", shim_path.display()))?;
+        return Ok(());
+    }
+
+    let shim_path = runtime.paths.bin.join(shim_name);
+    let target = relative_binary
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|| "packages/mntpack/payload/mntpack".to_string());
+    let default_root = runtime.paths.root.to_string_lossy();
+    let content = format!(
+        "#!/bin/sh\n{MNTPACK_HOME_ENV}=\"${{{MNTPACK_HOME_ENV}:-{default_root}}}\"\nMNTPACK_SELF=\"${{{MNTPACK_HOME_ENV}}}/{target}\"\nif [ -x \"$MNTPACK_SELF\" ]; then\n  exec \"$MNTPACK_SELF\" \"$@\"\nfi\necho \"mntpack: managed binary not found at $MNTPACK_SELF\" >&2\nexit 1\n"
     );
     fs::write(&shim_path, content)
         .with_context(|| format!("failed to write shim {}", shim_path.display()))?;
