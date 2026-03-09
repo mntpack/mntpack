@@ -43,11 +43,36 @@ async fn main() -> Result<()> {
         Commands::Run { package, args } => {
             commands::run::execute(&runtime, &package, &args).await?
         }
-        Commands::List => commands::list::execute(&runtime)?,
+        Commands::List { global } => commands::list::execute(&runtime, global)?,
         Commands::Update { package } => {
             commands::update::execute(&runtime, package.as_deref()).await?
         }
-        Commands::Doctor => commands::doctor::execute(&runtime)?,
+        Commands::Upgrade { package } => {
+            commands::upgrade::execute(&runtime, package.as_deref()).await?
+        }
+        Commands::Reinstall {
+            package,
+            version,
+            release,
+            name,
+            global,
+        } => {
+            commands::reinstall::execute(
+                &runtime,
+                &package,
+                version.as_deref(),
+                release.as_deref(),
+                name.as_deref(),
+                global,
+            )
+            .await?
+        }
+        Commands::Use { package, version } => {
+            commands::use_version::execute(&runtime, &package, &version)?
+        }
+        Commands::Inspect { repo } => commands::inspect::execute(&runtime, &repo)?,
+        Commands::Search { query } => commands::search::execute(&query).await?,
+        Commands::Doctor { fix } => commands::doctor::execute(&runtime, fix).await?,
         Commands::Config { action } => commands::config::execute(&runtime, action)?,
     }
 

@@ -9,7 +9,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    #[command(alias = "add")]
+    #[command(alias = "add", alias = "install")]
     Sync {
         repo: String,
         #[arg(short = 'v', long = "version")]
@@ -46,11 +46,43 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
-    List,
+    List {
+        #[arg(short = 'g', long = "global")]
+        global: bool,
+    },
     Update {
         package: Option<String>,
     },
-    Doctor,
+    Upgrade {
+        package: Option<String>,
+    },
+    #[command(alias = "resync")]
+    Reinstall {
+        package: String,
+        #[arg(short = 'v', long = "version")]
+        version: Option<String>,
+        #[arg(short = 'r', long = "release")]
+        release: Option<String>,
+        #[arg(short = 'n', long = "name")]
+        name: Option<String>,
+        #[arg(short = 'g', long = "global")]
+        global: bool,
+    },
+    Use {
+        package: String,
+        version: String,
+    },
+    Inspect {
+        repo: String,
+    },
+    Search {
+        #[arg(required = true)]
+        query: Vec<String>,
+    },
+    Doctor {
+        #[arg(short = 'f', long = "fix")]
+        fix: bool,
+    },
     Config {
         #[command(subcommand)]
         action: ConfigAction,

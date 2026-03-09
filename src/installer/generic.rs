@@ -1,7 +1,8 @@
 use anyhow::{Result, bail};
 
 use super::driver::{
-    DriverRuntime, InstallContext, InstallDriver, InstallResult, manifest_bin, run_shell_command,
+    DriverRuntime, InstallContext, InstallDriver, InstallResult, auto_discover_binary,
+    manifest_bin, run_shell_command,
 };
 
 pub struct GenericDriver;
@@ -12,23 +13,33 @@ impl InstallDriver for GenericDriver {
     }
 
     fn install(&self, ctx: &InstallContext, _runtime: &DriverRuntime<'_>) -> Result<InstallResult> {
-        let Some(manifest) = &ctx.manifest else {
-            bail!("generic installs require mntpack.json");
-        };
+        if let Some(manifest) = &ctx.manifest {
+            if let Some(build_command) = &manifest.build {
+                run_shell_command(build_command, &ctx.repo_path)?;
+            }
 
-        if let Some(build_command) = &manifest.build {
-            run_shell_command(build_command, &ctx.repo_path)?;
+            let binary = if manifest.resolve_bin_path().is_some() {
+                Some(manifest_bin(ctx)?)
+            } else if manifest.resolve_run_command().is_some()
+                || manifest.resolve_bin_command().is_some()
+            {
+                None
+            } else {
+                auto_discover_binary(&ctx.repo_path, &ctx.package_name)?
+            };
+
+            return Ok(InstallResult {
+                binary_path: binary,
+                shim_name: ctx.package_name.clone(),
+            });
         }
 
-        let binary = if manifest.resolve_bin_path().is_some() {
-            Some(manifest_bin(ctx)?)
-        } else if manifest.resolve_run_command().is_some()
-            || manifest.resolve_bin_command().is_some()
-        {
-            None
-        } else {
-            bail!("generic installs require either 'run' command or 'bin' path in mntpack.json");
-        };
+        let binary = auto_discover_binary(&ctx.repo_path, &ctx.package_name)?;
+        if binary.is_none() {
+            bail!(
+                "generic install could not determine executable; add mntpack.json or produce a binary in target/release, bin, dist, or build"
+            );
+        }
 
         Ok(InstallResult {
             binary_path: binary,

@@ -128,32 +128,46 @@ pub async fn sync_package_internal(
     let mut binary_rel_path: Option<String> = None;
     let mut store_entry: Option<String> = None;
     let mut build_pending = true;
+    let release_requested = release_asset.is_some();
+    let mut release_installed = false;
 
-    if let Some(manifest) = &manifest {
-        if run_command.is_none() {
-            if let Some(release_binary) =
-                try_download_release_binary(runtime, &resolved, manifest, version, release_asset)
-                    .await?
-            {
-                fs::create_dir_all(&package_dir)
-                    .with_context(|| format!("failed to create {}", package_dir.display()))?;
-                let staged = materialize_binary(&release_binary, &package_dir, &package_name)?;
-                let stored = persist_binary_to_store(
-                    runtime,
-                    &resolved.repo,
-                    version.or(manifest.version.as_deref()),
-                    commit.as_deref(),
-                    &package_dir,
-                    &package_name,
-                    &staged,
-                )?;
-                installed_binary = Some(stored.binary_path);
-                binary_rel_path = Some(stored.binary_rel_path);
-                store_entry = Some(stored.store_entry);
-                build_pending = false;
-            }
+    if run_command.is_none() {
+        if let Some(release_binary) = try_download_release_binary(
+            runtime,
+            &resolved,
+            manifest.as_ref(),
+            version,
+            release_asset,
+        )
+        .await?
+        {
+            fs::create_dir_all(&package_dir)
+                .with_context(|| format!("failed to create {}", package_dir.display()))?;
+            let staged = materialize_binary(&release_binary, &package_dir, &package_name)?;
+            let stored = persist_binary_to_store(
+                runtime,
+                &resolved.repo,
+                version.or(manifest.as_ref().and_then(|m| m.version.as_deref())),
+                commit.as_deref(),
+                &package_dir,
+                &package_name,
+                &staged,
+            )?;
+            installed_binary = Some(stored.binary_path);
+            binary_rel_path = Some(stored.binary_rel_path);
+            store_entry = Some(stored.store_entry);
+            build_pending = false;
+            release_installed = true;
         }
     }
+
+    if release_requested && run_command.is_none() && !release_installed {
+        bail!(
+            "no matching GitHub release asset found for '{}'",
+            resolved.key
+        );
+    }
+
     if is_special_repo(&resolved.owner, &resolved.repo)
         && run_command.is_none()
         && installed_binary.is_none()
@@ -290,7 +304,7 @@ async fn prepare_package(
             if let Some(release_binary) = try_download_release_binary(
                 runtime,
                 &resolve_repo(&record.repo_spec(), &runtime.config.default_owner)?,
-                manifest,
+                Some(manifest),
                 record.version.as_deref(),
                 None,
             )

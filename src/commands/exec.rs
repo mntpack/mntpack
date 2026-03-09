@@ -1,10 +1,12 @@
 use std::{
     fs,
+    path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, bail};
+use walkdir::WalkDir;
 
 use crate::{
     config::RuntimeContext,
@@ -13,10 +15,14 @@ use crate::{
         driver::{DriverRuntime, InstallContext, run_shell_command},
         manager::{InstallerManager, materialize_binary},
     },
-    package::{manifest::Manifest, resolver::resolve_repo},
+    package::{manifest::Manifest, record::find_record_by_package_name, resolver::resolve_repo},
 };
 
 pub async fn execute(runtime: &RuntimeContext, repo_input: &str, args: &[String]) -> Result<()> {
+    if let Some((package, version)) = parse_versioned_package(repo_input) {
+        return execute_stored_version(runtime, &package, &version, args);
+    }
+
     let resolved = resolve_repo(repo_input, &runtime.config.default_owner)?;
     let suffix = unique_suffix();
     let exec_root = runtime
@@ -64,7 +70,7 @@ pub async fn execute(runtime: &RuntimeContext, repo_input: &str, args: &[String]
     if run_command.is_none() {
         if let Some(manifest) = &manifest {
             if let Some(release_binary) =
-                try_download_release_binary(runtime, &resolved, manifest, None, None).await?
+                try_download_release_binary(runtime, &resolved, Some(manifest), None, None).await?
             {
                 installed_binary = Some(materialize_binary(
                     &release_binary,
@@ -142,4 +148,139 @@ fn shell_escape(input: &str) -> String {
     } else {
         format!("'{}'", input.replace('\'', "'\"'\"'"))
     }
+}
+
+fn parse_versioned_package(input: &str) -> Option<(String, String)> {
+    let trimmed = input.trim();
+    let (package, version) = trimmed.rsplit_once('@')?;
+    if package.is_empty() || version.is_empty() {
+        return None;
+    }
+    if package.contains('/') || package.contains("://") {
+        return None;
+    }
+    Some((package.to_string(), version.to_string()))
+}
+
+fn execute_stored_version(
+    runtime: &RuntimeContext,
+    package_name: &str,
+    version: &str,
+    args: &[String],
+) -> Result<()> {
+    let Some(record) = find_record_by_package_name(&runtime.paths.packages, package_name)? else {
+        bail!("package '{package_name}' is not installed");
+    };
+
+    let repo_segment = sanitize_store_component(&record.repo);
+    let version_segment = sanitize_store_component(version);
+    let store_dir = runtime
+        .paths
+        .store
+        .join(&repo_segment)
+        .join(&version_segment);
+    if !store_dir.exists() {
+        bail!(
+            "version '{}' is not installed for package '{}': {}",
+            version,
+            package_name,
+            store_dir.display()
+        );
+    }
+
+    let preferred_binary = record
+        .binary_path
+        .as_deref()
+        .and_then(|value| Path::new(value).file_name().and_then(|v| v.to_str()))
+        .map(ToString::to_string)
+        .or_else(|| {
+            record
+                .binary_rel_path
+                .as_deref()
+                .and_then(|value| Path::new(value).file_name().and_then(|v| v.to_str()))
+                .map(ToString::to_string)
+        });
+    let binary = select_binary_from_store(&store_dir, preferred_binary.as_deref())?;
+
+    let status = Command::new(&binary)
+        .args(args)
+        .status()
+        .with_context(|| format!("failed to launch {}", binary.display()))?;
+    if !status.success() {
+        bail!(
+            "exec for '{}@{}' exited with status {:?}",
+            package_name,
+            version,
+            status.code()
+        );
+    }
+
+    Ok(())
+}
+
+fn select_binary_from_store(store_dir: &Path, preferred_name: Option<&str>) -> Result<PathBuf> {
+    if let Some(name) = preferred_name {
+        let direct = store_dir.join(name);
+        if direct.exists() && is_executable_candidate(&direct)? {
+            return Ok(direct);
+        }
+    }
+
+    let mut candidates = Vec::new();
+    for entry in WalkDir::new(store_dir).into_iter().flatten() {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path().to_path_buf();
+        if !is_executable_candidate(&path)? {
+            continue;
+        }
+        candidates.push(path);
+    }
+
+    match candidates.len() {
+        0 => bail!("no executable binary found in {}", store_dir.display()),
+        1 => Ok(candidates.remove(0)),
+        _ => {
+            candidates.sort();
+            Ok(candidates.remove(0))
+        }
+    }
+}
+
+fn is_executable_candidate(path: &Path) -> Result<bool> {
+    if cfg!(windows) {
+        let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+        return Ok(ext.eq_ignore_ascii_case("exe"));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(path)
+            .with_context(|| format!("failed to read metadata for {}", path.display()))?
+            .permissions()
+            .mode();
+        return Ok(mode & 0o111 != 0);
+    }
+
+    #[allow(unreachable_code)]
+    Ok(false)
+}
+
+fn sanitize_store_component(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return "unknown".to_string();
+    }
+    trimmed
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }

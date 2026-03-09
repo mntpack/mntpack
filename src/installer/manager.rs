@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 
 use super::{
     cpp::CppDriver,
-    driver::{DriverRuntime, InstallContext, InstallDriver, InstallResult},
+    driver::{DriverRuntime, InstallContext, InstallDriver, InstallResult, auto_discover_binary},
     generic::GenericDriver,
     node::NodeDriver,
     python::PythonDriver,
@@ -43,7 +43,20 @@ impl InstallerManager {
         for driver in &self.drivers {
             if driver.detect(&ctx.repo_path) {
                 let result = driver.install(ctx, runtime)?;
-                let destination = if let Some(binary) = result.binary_path.as_ref() {
+                let mut selected_binary = result.binary_path.clone();
+                let has_command_launch = ctx
+                    .manifest
+                    .as_ref()
+                    .map(|manifest| {
+                        manifest.resolve_run_command().is_some()
+                            || manifest.resolve_bin_command().is_some()
+                    })
+                    .unwrap_or(false);
+                if selected_binary.is_none() && !has_command_launch {
+                    selected_binary = auto_discover_binary(&ctx.repo_path, &ctx.package_name)?;
+                }
+
+                let destination = if let Some(binary) = selected_binary.as_ref() {
                     Some(materialize_binary(
                         binary,
                         &ctx.package_dir,

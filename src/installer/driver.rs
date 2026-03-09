@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use walkdir::WalkDir;
 
 use crate::{config::RuntimeContext, package::manifest::Manifest};
 
@@ -86,4 +87,71 @@ fn format_command(program: &str, args: &[&str]) -> String {
         return program.to_string();
     }
     format!("{program} {}", args.join(" "))
+}
+
+pub fn auto_discover_binary(repo_path: &Path, package_name: &str) -> Result<Option<PathBuf>> {
+    let search_roots = [
+        repo_path.join("target").join("release"),
+        repo_path.join("bin"),
+        repo_path.join("dist"),
+        repo_path.join("build"),
+        repo_path.to_path_buf(),
+    ];
+
+    let mut candidates = Vec::new();
+    for root in search_roots {
+        if !root.exists() {
+            continue;
+        }
+        for entry in WalkDir::new(root).max_depth(5).into_iter().flatten() {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path().to_path_buf();
+            if !is_executable_candidate(&path)? {
+                continue;
+            }
+            candidates.push(path);
+        }
+    }
+
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+
+    if let Some(path) = candidates.iter().find(|path| {
+        path.file_stem()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case(package_name))
+            .unwrap_or(false)
+    }) {
+        return Ok(Some(path.clone()));
+    }
+
+    if candidates.len() == 1 {
+        return Ok(Some(candidates.remove(0)));
+    }
+
+    candidates.sort();
+    Ok(candidates.first().cloned())
+}
+
+fn is_executable_candidate(path: &Path) -> Result<bool> {
+    if cfg!(windows) {
+        return Ok(path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("exe"))
+            .unwrap_or(false));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)?.permissions().mode();
+        return Ok(mode & 0o111 != 0);
+    }
+
+    #[allow(unreachable_code)]
+    Ok(false)
 }
