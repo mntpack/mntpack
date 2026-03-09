@@ -1,5 +1,17 @@
 # Release Notes
 
+## 0.4.2 - 2026-03-09
+
+### Fixed
+- Fixed shim argument forwarding for command-driven packages:
+  - generated shims now call `mntpack run <package> -- ...`, so package flags like `--help` are passed to the package instead of being parsed by `mntpack run`.
+- Fixed run working-directory behavior for simple local executable run commands (for example `".\\wtree.exe"`):
+  - these are now launched directly, preserving the caller's current directory.
+- Fixed managed `mntpack` rebuild strategy in self-sync:
+  - uses isolated `CARGO_TARGET_DIR=.mntpack-build-target` during managed rebuilds to reduce target-directory lock contention.
+- Fixed repeated `os error 32` failures on unchanged managed commit sync:
+  - store binaries are no longer force-overwritten for existing entries; copy now occurs only when the target file is missing.
+
 ## 0.4.1 - 2026-03-09
 
 ### Fixed

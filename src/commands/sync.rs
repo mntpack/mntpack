@@ -3,6 +3,9 @@ use std::{
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    process::Command,
+    thread,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
@@ -172,32 +175,23 @@ pub async fn sync_package_internal(
         && run_command.is_none()
         && installed_binary.is_none()
     {
-        let runtime_driver = DriverRuntime { runtime };
-        let installer_ctx = InstallContext {
-            package_name: package_name.clone(),
-            repo_path: repo_dir.clone(),
-            package_dir: package_dir.clone(),
-            manifest: manifest.clone(),
-        };
-        match InstallerManager::new().install(&installer_ctx, &runtime_driver) {
-            Ok(result) => {
-                if let Some(binary) = result.binary_path {
-                    let stored = persist_binary_to_store(
-                        runtime,
-                        &resolved.repo,
-                        version
-                            .or(manifest.as_ref().and_then(|m| m.version.as_deref()))
-                            .or(commit.as_deref()),
-                        commit.as_deref(),
-                        &package_dir,
-                        &package_name,
-                        &binary,
-                    )?;
-                    installed_binary = Some(stored.binary_path);
-                    binary_rel_path = Some(stored.binary_rel_path);
-                    store_entry = Some(stored.store_entry);
-                    build_pending = false;
-                }
+        match build_special_repo_binary(runtime, &repo_dir, &package_name) {
+            Ok(binary) => {
+                let stored = persist_binary_to_store(
+                    runtime,
+                    &resolved.repo,
+                    version
+                        .or(manifest.as_ref().and_then(|m| m.version.as_deref()))
+                        .or(commit.as_deref()),
+                    commit.as_deref(),
+                    &package_dir,
+                    &package_name,
+                    &binary,
+                )?;
+                installed_binary = Some(stored.binary_path);
+                binary_rel_path = Some(stored.binary_rel_path);
+                store_entry = Some(stored.store_entry);
+                build_pending = false;
             }
             Err(err) => {
                 eprintln!(
@@ -459,23 +453,8 @@ fn persist_binary_to_store(
         .map(|name| name.to_string())
         .unwrap_or(fallback_name);
     let stored_binary = store_dir.join(&file_name);
-    let should_overwrite = if package_name.eq_ignore_ascii_case(SPECIAL_PACKAGE_NAME) {
-        let running_from_store = std::env::current_exe()
-            .ok()
-            .map(|exe| exe.starts_with(&runtime.paths.store))
-            .unwrap_or(false);
-        !running_from_store
-    } else {
-        false
-    };
-    if should_overwrite || !stored_binary.exists() {
-        fs::copy(source_binary, &stored_binary).with_context(|| {
-            format!(
-                "failed to copy binary {} -> {}",
-                source_binary.display(),
-                stored_binary.display()
-            )
-        })?;
+    if !stored_binary.exists() {
+        copy_file_with_retry(source_binary, &stored_binary)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -601,6 +580,40 @@ fn remove_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn copy_file_with_retry(source: &Path, destination: &Path) -> Result<()> {
+    let mut last_error: Option<std::io::Error> = None;
+    for attempt in 0..60 {
+        match fs::copy(source, destination) {
+            Ok(_) => return Ok(()),
+            Err(err) => {
+                let locked = cfg!(windows) && err.raw_os_error() == Some(32);
+                if locked && attempt < 59 {
+                    last_error = Some(err);
+                    thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+                return Err(err).with_context(|| {
+                    format!(
+                        "failed to copy binary {} -> {}",
+                        source.display(),
+                        destination.display()
+                    )
+                });
+            }
+        }
+    }
+
+    let err =
+        last_error.unwrap_or_else(|| std::io::Error::other("copy failed after retry attempts"));
+    Err(err).with_context(|| {
+        format!(
+            "failed to copy binary {} -> {}",
+            source.display(),
+            destination.display()
+        )
+    })
+}
+
 fn stage_current_executable(package_dir: &Path) -> Result<PathBuf> {
     let current_exe = std::env::current_exe().context("failed to resolve current executable")?;
     if !current_exe.exists() {
@@ -629,6 +642,57 @@ fn stage_current_executable(package_dir: &Path) -> Result<PathBuf> {
     }
 
     Ok(destination)
+}
+
+fn build_special_repo_binary(
+    runtime: &RuntimeContext,
+    repo_dir: &Path,
+    package_name: &str,
+) -> Result<PathBuf> {
+    let target_dir = repo_dir.join(".mntpack-build-target");
+    let status = Command::new(&runtime.config.paths.cargo)
+        .args(["build", "--release"])
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .current_dir(repo_dir)
+        .status()
+        .with_context(|| {
+            format!(
+                "failed to run '{} build --release' in {}",
+                runtime.config.paths.cargo,
+                repo_dir.display()
+            )
+        })?;
+    if !status.success() {
+        bail!(
+            "command '{}' failed with exit code {:?}",
+            format!("{} build --release", runtime.config.paths.cargo),
+            status.code()
+        );
+    }
+
+    let release_dir = target_dir.join("release");
+    let candidates = if cfg!(windows) {
+        vec![
+            release_dir.join(format!("{package_name}.exe")),
+            release_dir.join(format!("{}.exe", package_name.replace('-', "_"))),
+            release_dir.join("mntpack.exe"),
+        ]
+    } else {
+        vec![
+            release_dir.join(package_name),
+            release_dir.join(package_name.replace('-', "_")),
+            release_dir.join("mntpack"),
+        ]
+    };
+    for candidate in candidates {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    bail!(
+        "managed rebuild completed but no binary found in {}",
+        release_dir.display()
+    )
 }
 
 fn sanitize_store_component(input: &str) -> String {
