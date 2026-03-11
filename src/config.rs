@@ -38,6 +38,23 @@ impl Default for ToolPaths {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
+pub struct BinaryCacheConfig {
+    pub enabled: bool,
+    pub repo: Option<String>,
+}
+
+impl Default for BinaryCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            repo: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default = "default_owner")]
     pub default_owner: String,
@@ -45,6 +62,8 @@ pub struct Config {
     pub paths: ToolPaths,
     #[serde(default)]
     pub auto_update_on_run: bool,
+    #[serde(default)]
+    pub binary_cache: BinaryCacheConfig,
 }
 
 impl Default for Config {
@@ -53,6 +72,7 @@ impl Default for Config {
             default_owner: default_owner(),
             paths: ToolPaths::default(),
             auto_update_on_run: false,
+            binary_cache: BinaryCacheConfig::default(),
         }
     }
 }

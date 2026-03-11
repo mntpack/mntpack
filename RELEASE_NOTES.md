@@ -1,5 +1,30 @@
 # Release Notes
 
+## 0.5.0 - 2026-03-11
+
+### Added
+- Deterministic lockfile support with `mntpack.lock`:
+  - `sync` now respects pinned lock entries (`commit` + `binary_hash`) when present.
+  - `lock regenerate` command added to rebuild `mntpack.lock` from installed package metadata.
+- Content-addressed binary store:
+  - binaries are stored at `store/sha256/<hash>/<binary>`.
+  - package records now include `binaryHash` and `binaryName`.
+- Remote binary cache system:
+  - new config section: `binaryCache.enabled` and `binaryCache.repo`.
+  - new command: `prebuild` (build/sync current repo and upload hashed binary to cache repo).
+  - lockfile-based installs now attempt cache download before local build when hash is known.
+- New dependency explanation command:
+  - `why <package>` shows upward dependency paths from installed package metadata.
+
+### Changed
+- `update` now bypasses lock pinning while syncing and then regenerates `mntpack.lock`.
+- `upgrade` now bypasses lock pinning and regenerates `mntpack.lock` after upgrade flow.
+- `sync` now refreshes the full lockfile after install and warns when a package has no binary hash.
+- Store compatibility for version workflows:
+  - version aliases are now tracked under `store/versions/<repo>/<version-or-commit>/...`,
+  - `use <package> <version>` and `exec <package>@<version>` now resolve through those aliases while keeping active records hash-backed.
+- Remove flow now refreshes lockfile (if present in current directory) and cleans version-alias directories when a repo is fully removed.
+
 ## 0.4.5 - 2026-03-09
 
 ### Fixed

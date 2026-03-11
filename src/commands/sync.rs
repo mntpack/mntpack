@@ -15,6 +15,7 @@ use tokio::task::JoinSet;
 use walkdir::WalkDir;
 
 use crate::{
+    binary_cache,
     config::RuntimeContext,
     github::{
         clone::{head_commit_short, sync_repo},
@@ -25,12 +26,17 @@ use crate::{
         manager::{InstallerManager, materialize_binary},
     },
     package::{
+        lockfile,
         manifest::Manifest,
         record::{
             PackageRecord, find_record_by_package_name, find_record_by_repo, load_record,
             save_record,
         },
         resolver::resolve_repo,
+        store::{
+            executable_in_hash_store, hash_store_dir, hash_store_entry, normalize_hash,
+            require_binary_name, sha256_file, version_store_dir,
+        },
     },
     shim::generator::{create_shim, ensure_bin_on_path},
 };
@@ -63,7 +69,7 @@ pub async fn execute(
     }
 
     let mut visited = HashSet::new();
-    let record = sync_package_internal(
+    let mut record = sync_package_internal(
         runtime,
         &effective_repo_input,
         version,
@@ -71,9 +77,26 @@ pub async fn execute(
         effective_name.as_deref(),
         global,
         &mut visited,
+        true,
     )
     .await?;
+    if record.binary_hash.is_none() && record.run_command.is_none() {
+        record = ensure_package_ready(runtime, &record.package_name).await?;
+    }
+    if record.binary_hash.is_none() {
+        eprintln!(
+            "warning: '{}' has no binary hash; lockfile entry was not generated",
+            record.package_name
+        );
+    }
+    refresh_lockfile(runtime)?;
     println!("synced {} ({})", record.package_name, record.repo_spec());
+    Ok(())
+}
+
+fn refresh_lockfile(runtime: &RuntimeContext) -> Result<()> {
+    let lock = lockfile::regenerate_from_installed(runtime)?;
+    lockfile::save_to_cwd(&lock)?;
     Ok(())
 }
 
@@ -86,8 +109,23 @@ pub async fn sync_package_internal(
     custom_name: Option<&str>,
     global: bool,
     visited: &mut HashSet<String>,
+    respect_lockfile: bool,
 ) -> Result<PackageRecord> {
     let resolved = resolve_repo(repo_input, &runtime.config.default_owner)?;
+    let lock_entry = if respect_lockfile {
+        lockfile::load_from_cwd()?.and_then(|lock| lock.packages.get(&resolved.key).cloned())
+    } else {
+        None
+    };
+    let lock_hash = lock_entry
+        .as_ref()
+        .map(|entry| normalize_hash(&entry.binary_hash));
+    let enforce_hash_match = lock_hash.is_some();
+    let effective_version = lock_entry
+        .as_ref()
+        .map(|entry| entry.commit.as_str())
+        .or(version);
+
     if visited.contains(&resolved.key) {
         if let Some(record) =
             find_record_by_repo(&runtime.paths.packages, &resolved.owner, &resolved.repo)?
@@ -111,9 +149,9 @@ pub async fn sync_package_internal(
         &repo_dir,
         &runtime.paths.cache_git,
         &runtime.config.paths.git,
-        version,
+        effective_version,
     )?;
-    validate_tag_when_release_selected(&repo_dir, version, release_asset)?;
+    validate_tag_when_release_selected(&repo_dir, effective_version, release_asset)?;
     let commit = head_commit_short(&repo_dir).ok();
     let manifest = Manifest::load(&repo_dir)?;
     let bin_command = manifest.as_ref().and_then(|m| m.resolve_bin_command());
@@ -124,22 +162,82 @@ pub async fn sync_package_internal(
     let preferred_shim_name = bin_command.as_ref().map(|(name, _)| name.clone());
 
     if let Some(manifest) = &manifest {
-        sync_dependencies_parallel(runtime, manifest.dependencies.clone()).await?;
+        sync_dependencies_parallel(runtime, manifest.dependencies.clone(), respect_lockfile)
+            .await?;
     }
 
     let mut installed_binary: Option<PathBuf> = None;
     let mut binary_rel_path: Option<String> = None;
     let mut store_entry: Option<String> = None;
+    let mut binary_hash: Option<String> = None;
+    let mut binary_name: Option<String> = None;
     let mut build_pending = true;
     let release_requested = release_asset.is_some();
     let mut release_installed = false;
+    let mut active_hash = lock_hash.clone();
+
+    if active_hash.is_none() {
+        if let Some(existing) =
+            find_record_by_repo(&runtime.paths.packages, &resolved.owner, &resolved.repo)?
+        {
+            if existing.commit == commit {
+                active_hash = existing.binary_hash;
+            }
+        }
+    }
 
     if run_command.is_none() {
+        if let Some(expected_hash) = active_hash.as_deref() {
+            if let Some(binary) =
+                executable_in_hash_store(&runtime.paths.store, expected_hash, None)?
+            {
+                fs::create_dir_all(&package_dir)
+                    .with_context(|| format!("failed to create {}", package_dir.display()))?;
+                let stored = persist_binary_to_store(
+                    runtime,
+                    &resolved.repo,
+                    effective_version.or(manifest.as_ref().and_then(|m| m.version.as_deref())),
+                    commit.as_deref(),
+                    &package_dir,
+                    &package_name,
+                    &binary,
+                )?;
+                installed_binary = Some(stored.binary_path);
+                binary_rel_path = Some(stored.binary_rel_path);
+                store_entry = Some(stored.store_entry);
+                binary_hash = Some(stored.binary_hash);
+                binary_name = Some(stored.binary_name);
+                build_pending = false;
+            } else if let Some(cached) =
+                binary_cache::try_download_cached_binary(runtime, &resolved.key, expected_hash)?
+            {
+                fs::create_dir_all(&package_dir)
+                    .with_context(|| format!("failed to create {}", package_dir.display()))?;
+                let stored = persist_binary_to_store(
+                    runtime,
+                    &resolved.repo,
+                    effective_version.or(manifest.as_ref().and_then(|m| m.version.as_deref())),
+                    commit.as_deref(),
+                    &package_dir,
+                    &package_name,
+                    &cached,
+                )?;
+                installed_binary = Some(stored.binary_path);
+                binary_rel_path = Some(stored.binary_rel_path);
+                store_entry = Some(stored.store_entry);
+                binary_hash = Some(stored.binary_hash);
+                binary_name = Some(stored.binary_name);
+                build_pending = false;
+            }
+        }
+    }
+
+    if run_command.is_none() && installed_binary.is_none() {
         if let Some(release_binary) = try_download_release_binary(
             runtime,
             &resolved,
             manifest.as_ref(),
-            version,
+            effective_version,
             release_asset,
         )
         .await?
@@ -150,7 +248,7 @@ pub async fn sync_package_internal(
             let stored = persist_binary_to_store(
                 runtime,
                 &resolved.repo,
-                version.or(manifest.as_ref().and_then(|m| m.version.as_deref())),
+                effective_version.or(manifest.as_ref().and_then(|m| m.version.as_deref())),
                 commit.as_deref(),
                 &package_dir,
                 &package_name,
@@ -159,6 +257,8 @@ pub async fn sync_package_internal(
             installed_binary = Some(stored.binary_path);
             binary_rel_path = Some(stored.binary_rel_path);
             store_entry = Some(stored.store_entry);
+            binary_hash = Some(stored.binary_hash);
+            binary_name = Some(stored.binary_name);
             build_pending = false;
             release_installed = true;
         }
@@ -180,7 +280,7 @@ pub async fn sync_package_internal(
                 let stored = persist_binary_to_store(
                     runtime,
                     &resolved.repo,
-                    version
+                    effective_version
                         .or(manifest.as_ref().and_then(|m| m.version.as_deref()))
                         .or(commit.as_deref()),
                     commit.as_deref(),
@@ -191,6 +291,8 @@ pub async fn sync_package_internal(
                 installed_binary = Some(stored.binary_path);
                 binary_rel_path = Some(stored.binary_rel_path);
                 store_entry = Some(stored.store_entry);
+                binary_hash = Some(stored.binary_hash);
+                binary_name = Some(stored.binary_name);
                 build_pending = false;
             }
             Err(err) => {
@@ -203,7 +305,7 @@ pub async fn sync_package_internal(
                 let stored = persist_binary_to_store(
                     runtime,
                     &resolved.repo,
-                    version
+                    effective_version
                         .or(manifest.as_ref().and_then(|m| m.version.as_deref()))
                         .or(commit.as_deref()),
                     commit.as_deref(),
@@ -214,6 +316,8 @@ pub async fn sync_package_internal(
                 installed_binary = Some(stored.binary_path);
                 binary_rel_path = Some(stored.binary_rel_path);
                 store_entry = Some(stored.store_entry);
+                binary_hash = Some(stored.binary_hash);
+                binary_name = Some(stored.binary_name);
                 build_pending = false;
             }
         }
@@ -235,17 +339,38 @@ pub async fn sync_package_internal(
         }
     }
 
+    if enforce_hash_match {
+        let expected_hash = active_hash.unwrap_or_default();
+        if let Some(actual_hash) = binary_hash.as_deref() {
+            if normalize_hash(actual_hash) != normalize_hash(&expected_hash) {
+                bail!(
+                    "binary hash mismatch for '{}': expected sha256:{}, got sha256:{}",
+                    resolved.key,
+                    normalize_hash(&expected_hash),
+                    normalize_hash(actual_hash)
+                );
+            }
+        } else {
+            bail!(
+                "lockfile requires binary hash for '{}' but installation produced no binary",
+                resolved.key
+            );
+        }
+    }
+
     let record = PackageRecord {
         package_name,
         owner: resolved.owner.clone(),
         repo: resolved.repo.clone(),
-        version: version
+        version: effective_version
             .map(|v| v.to_string())
             .or_else(|| manifest.as_ref().and_then(|m| m.version.clone())),
         commit,
         run_command,
         binary_rel_path,
         binary_path: installed_binary.map(|path| path.to_string_lossy().to_string()),
+        binary_hash,
+        binary_name,
         shim_name: Some(shim_name),
         store_entry,
         build_pending,
@@ -361,6 +486,8 @@ async fn prepare_package(
     let mut binary_rel_path = None;
     let mut store_entry = None;
     let mut binary_path = None;
+    let mut binary_hash = None;
+    let mut binary_name = None;
     if let Some(binary) = installed_binary {
         let stored = persist_binary_to_store(
             runtime,
@@ -374,12 +501,16 @@ async fn prepare_package(
         binary_rel_path = Some(stored.binary_rel_path);
         binary_path = Some(stored.binary_path.to_string_lossy().to_string());
         store_entry = Some(stored.store_entry);
+        binary_hash = Some(stored.binary_hash);
+        binary_name = Some(stored.binary_name);
     }
 
     record.run_command = run_command;
     record.shim_name = Some(shim_name.clone());
     record.binary_rel_path = binary_rel_path;
     record.binary_path = binary_path;
+    record.binary_hash = binary_hash;
+    record.binary_name = binary_name;
     record.store_entry = store_entry;
     record.build_pending = false;
 
@@ -392,6 +523,14 @@ async fn prepare_package(
 }
 
 pub fn resolve_binary_path(runtime: &RuntimeContext, record: &PackageRecord) -> Option<PathBuf> {
+    if let (Some(hash), Some(name)) = (record.binary_hash.as_deref(), record.binary_name.as_deref())
+    {
+        let path = hash_store_dir(&runtime.paths.store, hash).join(name);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
     if let Some(explicit) = record.binary_path.as_deref() {
         let path = PathBuf::from(explicit);
         if path.is_absolute() {
@@ -412,6 +551,8 @@ struct StorePlacement {
     binary_path: PathBuf,
     binary_rel_path: String,
     store_entry: String,
+    binary_hash: String,
+    binary_name: String,
 }
 
 fn persist_binary_to_store(
@@ -426,19 +567,9 @@ fn persist_binary_to_store(
     fs::create_dir_all(&runtime.paths.store)
         .with_context(|| format!("failed to create {}", runtime.paths.store.display()))?;
 
-    let label = version
-        .filter(|v| !v.trim().is_empty())
-        .map(|v| v.to_string())
-        .or_else(|| commit.map(|c| c.to_string()))
-        .unwrap_or_else(|| "latest".to_string());
-    let repo_segment = sanitize_store_component(repo_name);
-    let version_segment = sanitize_store_component(&label);
-    let store_entry = format!("{repo_segment}/{version_segment}");
-    let store_dir = runtime
-        .paths
-        .store
-        .join(&repo_segment)
-        .join(&version_segment);
+    let binary_hash = sha256_file(source_binary)?;
+    let store_entry = hash_store_entry(&binary_hash);
+    let store_dir = hash_store_dir(&runtime.paths.store, &binary_hash);
     fs::create_dir_all(&store_dir)
         .with_context(|| format!("failed to create {}", store_dir.display()))?;
 
@@ -447,11 +578,7 @@ fn persist_binary_to_store(
     } else {
         package_name.to_string()
     };
-    let file_name = source_binary
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name.to_string())
-        .unwrap_or(fallback_name);
+    let file_name = require_binary_name(source_binary, &fallback_name)?;
     let stored_binary = store_dir.join(&file_name);
     if !stored_binary.exists() {
         copy_file_with_retry(source_binary, &stored_binary)?;
@@ -463,6 +590,14 @@ fn persist_binary_to_store(
             fs::set_permissions(&stored_binary, perms)?;
         }
     }
+    create_version_store_aliases(
+        runtime,
+        repo_name,
+        version,
+        commit,
+        &stored_binary,
+        &file_name,
+    )?;
 
     if package_name.eq_ignore_ascii_case(SPECIAL_PACKAGE_NAME) {
         let payload_dir = package_dir.join(PAYLOAD_LINK_NAME);
@@ -492,6 +627,8 @@ fn persist_binary_to_store(
             binary_path: stored_binary,
             binary_rel_path: rel,
             store_entry,
+            binary_hash,
+            binary_name: file_name,
         });
     }
 
@@ -504,6 +641,8 @@ fn persist_binary_to_store(
         binary_path: stored_binary,
         binary_rel_path: format!("{PAYLOAD_LINK_NAME}/{file_name}"),
         store_entry,
+        binary_hash,
+        binary_name: file_name,
     })
 }
 
@@ -578,6 +717,73 @@ fn remove_path(path: &Path) -> Result<()> {
         fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))?;
     }
     Ok(())
+}
+
+fn create_version_store_aliases(
+    runtime: &RuntimeContext,
+    repo_name: &str,
+    version: Option<&str>,
+    commit: Option<&str>,
+    stored_binary: &Path,
+    binary_name: &str,
+) -> Result<()> {
+    let labels = version_alias_labels(version, commit);
+    for label in labels {
+        let alias_dir = version_store_dir(&runtime.paths.store, repo_name, &label);
+        fs::create_dir_all(&alias_dir)
+            .with_context(|| format!("failed to create {}", alias_dir.display()))?;
+        let alias_binary = alias_dir.join(binary_name);
+        if alias_binary.exists() {
+            continue;
+        }
+        if try_symlink_file(stored_binary, &alias_binary).is_err() {
+            copy_file_with_retry(stored_binary, &alias_binary)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&alias_binary)?.permissions();
+                perms.set_mode(0o755);
+                fs::set_permissions(&alias_binary, perms)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn version_alias_labels(version: Option<&str>, commit: Option<&str>) -> Vec<String> {
+    let mut labels = Vec::new();
+    if let Some(version) = version.map(str::trim).filter(|value| !value.is_empty()) {
+        labels.push(version.to_string());
+    }
+    if let Some(commit) = commit.map(str::trim).filter(|value| !value.is_empty()) {
+        labels.push(commit.to_string());
+    }
+    labels.sort();
+    labels.dedup();
+    labels
+}
+
+fn try_symlink_file(target: &Path, link: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(target, link).with_context(|| {
+            format!(
+                "failed to symlink {} -> {}",
+                link.display(),
+                target.display()
+            )
+        })
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).with_context(|| {
+            format!(
+                "failed to symlink {} -> {}",
+                link.display(),
+                target.display()
+            )
+        })
+    }
 }
 
 fn copy_file_with_retry(source: &Path, destination: &Path) -> Result<()> {
@@ -695,26 +901,10 @@ fn build_special_repo_binary(
     )
 }
 
-fn sanitize_store_component(input: &str) -> String {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return "unknown".to_string();
-    }
-    trimmed
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect()
-}
-
 async fn sync_dependencies_parallel(
     runtime: &RuntimeContext,
     dependencies: Vec<String>,
+    respect_lockfile: bool,
 ) -> Result<()> {
     if dependencies.is_empty() {
         return Ok(());
@@ -732,6 +922,7 @@ async fn sync_dependencies_parallel(
                 None,
                 false,
                 &mut dependency_visited,
+                respect_lockfile,
             )
             .await
         });

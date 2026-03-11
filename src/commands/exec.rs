@@ -15,7 +15,10 @@ use crate::{
         driver::{DriverRuntime, InstallContext, run_shell_command},
         manager::{InstallerManager, materialize_binary},
     },
-    package::{manifest::Manifest, record::find_record_by_package_name, resolver::resolve_repo},
+    package::{
+        manifest::Manifest, record::find_record_by_package_name, resolver::resolve_repo,
+        store::version_store_dir,
+    },
 };
 
 pub async fn execute(runtime: &RuntimeContext, repo_input: &str, args: &[String]) -> Result<()> {
@@ -172,13 +175,7 @@ fn execute_stored_version(
         bail!("package '{package_name}' is not installed");
     };
 
-    let repo_segment = sanitize_store_component(&record.repo);
-    let version_segment = sanitize_store_component(version);
-    let store_dir = runtime
-        .paths
-        .store
-        .join(&repo_segment)
-        .join(&version_segment);
+    let store_dir = version_store_dir(&runtime.paths.store, &record.repo, version);
     if !store_dir.exists() {
         bail!(
             "version '{}' is not installed for package '{}': {}",
@@ -266,21 +263,4 @@ fn is_executable_candidate(path: &Path) -> Result<bool> {
 
     #[allow(unreachable_code)]
     Ok(false)
-}
-
-fn sanitize_store_component(input: &str) -> String {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return "unknown".to_string();
-    }
-    trimmed
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect()
 }

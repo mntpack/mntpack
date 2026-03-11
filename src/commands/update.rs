@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use crate::{
     config::RuntimeContext,
+    package::lockfile::{regenerate_from_installed, save_to_cwd},
     package::record::{find_record_by_package_name, load_all_records},
 };
 
@@ -19,13 +20,18 @@ pub async fn execute(runtime: &RuntimeContext, package: Option<&str>) -> Result<
                 Some(&record.package_name),
                 record.global,
                 &mut visited,
+                false,
             )
             .await?;
             println!("updated {}", record.package_name);
+            let lock = regenerate_from_installed(runtime)?;
+            save_to_cwd(&lock)?;
             return Ok(());
         }
 
         crate::commands::sync::execute(runtime, package_name, None, None, None, false).await?;
+        let lock = regenerate_from_installed(runtime)?;
+        save_to_cwd(&lock)?;
         return Ok(());
     }
 
@@ -45,10 +51,13 @@ pub async fn execute(runtime: &RuntimeContext, package: Option<&str>) -> Result<
             Some(&record.package_name),
             record.global,
             &mut visited,
+            false,
         )
         .await?;
     }
 
+    let lock = regenerate_from_installed(runtime)?;
+    save_to_cwd(&lock)?;
     println!("updated {} package(s)", records.len());
     Ok(())
 }

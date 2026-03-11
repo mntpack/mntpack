@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 
 use crate::{
     config::RuntimeContext,
+    package::lockfile::{regenerate_from_installed, save_to_cwd},
     package::record::{find_record_by_package_name, load_all_records},
 };
 
@@ -19,9 +20,12 @@ pub async fn execute(runtime: &RuntimeContext, package: Option<&str>) -> Result<
                 Some(&record.package_name),
                 record.global,
                 &mut visited,
+                false,
             )
             .await?;
             println!("upgraded {}", record.package_name);
+            let lock = regenerate_from_installed(runtime)?;
+            save_to_cwd(&lock)?;
             return Ok(());
         }
 
@@ -46,6 +50,7 @@ pub async fn execute(runtime: &RuntimeContext, package: Option<&str>) -> Result<
             Some(&record.package_name),
             record.global,
             &mut visited,
+            false,
         )
         .await;
         match result {
@@ -58,10 +63,14 @@ pub async fn execute(runtime: &RuntimeContext, package: Option<&str>) -> Result<
     }
 
     if failed > 0 {
+        let lock = regenerate_from_installed(runtime)?;
+        save_to_cwd(&lock)?;
         eprintln!("upgraded {upgraded} package(s), {failed} failed");
         return Ok(());
     }
 
+    let lock = regenerate_from_installed(runtime)?;
+    save_to_cwd(&lock)?;
     println!("upgraded {upgraded} package(s)");
     Ok(())
 }

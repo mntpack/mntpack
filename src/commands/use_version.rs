@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use walkdir::WalkDir;
 
 use crate::{
     config::RuntimeContext,
-    package::record::{find_record_by_package_name, save_record},
+    package::{
+        record::{find_record_by_package_name, save_record},
+        store::{hash_store_dir, hash_store_entry, sha256_file, version_store_dir},
+    },
     shim::generator::create_shim,
 };
 
@@ -25,13 +28,7 @@ pub fn execute(runtime: &RuntimeContext, package: &str, version: &str) -> Result
         bail!("package '{package_name}' is not installed");
     };
 
-    let repo_segment = sanitize_store_component(&record.repo);
-    let version_segment = sanitize_store_component(version_name);
-    let store_dir = runtime
-        .paths
-        .store
-        .join(&repo_segment)
-        .join(&version_segment);
+    let store_dir = version_store_dir(&runtime.paths.store, &record.repo, version_name);
     if !store_dir.exists() {
         bail!(
             "version '{}' is not installed for package '{}' (missing {})",
@@ -43,6 +40,18 @@ pub fn execute(runtime: &RuntimeContext, package: &str, version: &str) -> Result
 
     let preferred_name = preferred_binary_name(&record);
     let binary = select_binary_from_store(&store_dir, preferred_name.as_deref())?;
+    let binary_hash = sha256_file(&binary)?;
+    let binary_name = binary
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(ToString::to_string)
+        .ok_or_else(|| anyhow!("unable to determine binary file name"))?;
+    let canonical = hash_store_dir(&runtime.paths.store, &binary_hash).join(&binary_name);
+    let active_binary = if canonical.exists() {
+        canonical
+    } else {
+        binary.clone()
+    };
     let shim_name = record
         .shim_name
         .clone()
@@ -50,12 +59,14 @@ pub fn execute(runtime: &RuntimeContext, package: &str, version: &str) -> Result
 
     record.version = Some(version_name.to_string());
     record.commit = None;
-    record.store_entry = Some(format!("{repo_segment}/{version_segment}"));
-    record.binary_path = Some(binary.to_string_lossy().to_string());
+    record.store_entry = Some(hash_store_entry(&binary_hash));
+    record.binary_hash = Some(binary_hash);
+    record.binary_name = Some(binary_name);
+    record.binary_path = Some(active_binary.to_string_lossy().to_string());
     record.binary_rel_path = Some(
-        binary
+        active_binary
             .strip_prefix(&runtime.paths.root)
-            .unwrap_or(&binary)
+            .unwrap_or(&active_binary)
             .to_string_lossy()
             .replace('\\', "/"),
     );
@@ -64,7 +75,12 @@ pub fn execute(runtime: &RuntimeContext, package: &str, version: &str) -> Result
     save_record(&package_dir, &record)?;
 
     if record.global {
-        create_shim(runtime, &record.package_name, &shim_name, Some(&binary))?;
+        create_shim(
+            runtime,
+            &record.package_name,
+            &shim_name,
+            Some(&active_binary),
+        )?;
     }
 
     println!("using {} {}", record.package_name, version_name);
@@ -130,21 +146,4 @@ fn is_executable_candidate(path: &Path) -> Result<bool> {
     }
     #[allow(unreachable_code)]
     Ok(false)
-}
-
-fn sanitize_store_component(input: &str) -> String {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return "unknown".to_string();
-    }
-    trimmed
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect()
 }

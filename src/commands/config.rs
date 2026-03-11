@@ -41,6 +41,8 @@ fn get_value(config: &Config, key: &str) -> Result<String> {
         "pathscmake" => Ok(config.paths.cmake.clone()),
         "pathsmake" => Ok(config.paths.make.clone()),
         "autoupdateonrun" => Ok(config.auto_update_on_run.to_string()),
+        "binarycacheenabled" => Ok(config.binary_cache.enabled.to_string()),
+        "binarycacherepo" => Ok(config.binary_cache.repo.clone().unwrap_or_default()),
         _ => bail!("unknown config key '{key}'"),
     }
 }
@@ -60,6 +62,19 @@ fn set_value(config: &mut Config, key: &str, value: &str) -> Result<()> {
             config.auto_update_on_run = value
                 .parse::<bool>()
                 .map_err(|_| anyhow::anyhow!("expected true/false for '{}'", key))?
+        }
+        "binarycacheenabled" => {
+            config.binary_cache.enabled = value
+                .parse::<bool>()
+                .map_err(|_| anyhow::anyhow!("expected true/false for '{}'", key))?
+        }
+        "binarycacherepo" => {
+            let trimmed = value.trim();
+            config.binary_cache.repo = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
         }
         _ => bail!("unknown config key '{key}'"),
     }

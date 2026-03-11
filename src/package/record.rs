@@ -17,6 +17,10 @@ pub struct PackageRecord {
     pub binary_rel_path: Option<String>,
     #[serde(default)]
     pub binary_path: Option<String>,
+    #[serde(default)]
+    pub binary_hash: Option<String>,
+    #[serde(default)]
+    pub binary_name: Option<String>,
     pub run_command: Option<String>,
     #[serde(default)]
     pub shim_name: Option<String>,
