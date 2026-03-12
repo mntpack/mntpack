@@ -1,5 +1,12 @@
 # Release Notes
 
+## 0.6.3 - 2026-03-12
+
+### Changed
+- Removed the `mntpack build` YAML recipe system.
+- `mntpack` now relies on `mntpack.json` for package build/run metadata.
+- Removed internal recipe module/command wiring and dropped `serde_yaml` dependency.
+
 ## 0.6.2 - 2026-03-12
 
 ### Changed

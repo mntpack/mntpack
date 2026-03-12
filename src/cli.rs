@@ -9,11 +9,6 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    Build {
-        recipe: Option<String>,
-        #[arg(short = 'G', long = "generate")]
-        generate: bool,
-    },
     #[command(alias = "add", alias = "install")]
     Sync {
         repo: String,

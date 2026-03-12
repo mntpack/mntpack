@@ -25,8 +25,6 @@ The installer:
 ## 2. Core Commands
 
 ```bash
-mntpack build [recipe.yml]
-mntpack build --generate [recipe.yml]
 mntpack sync <repo> [-v <tag_or_commit>] [-r <release_asset_file>] [-n <custom_name>] [-g]
 mntpack install <repo> [-v <tag_or_commit>] [-r <release_asset_file|auto>] [-n <custom_name>] [-g]
 mntpack add <repo> [-v <tag_or_commit>] [-r <release_asset_file>] [-n <custom_name>] [-g]
@@ -53,27 +51,6 @@ mntpack prebuild
 mntpack why <package>
 mntpack lock regenerate
 mntpack doctor [--fix]
-```
-
-## 2.1 Build Recipes
-
-`mntpack build` runs YAML build recipes:
-
-- `mntpack build` reads `./mntpack.yml`
-- `mntpack build path/to/recipe.yml` reads an explicit file
-- `mntpack build --generate` creates `./mntpack.yml`
-- `mntpack build --generate path/to/recipe.yml` creates a template at a custom path
-
-Recipe example:
-
-```yaml
-version: 1
-name: my-project
-steps:
-  - name: build
-    run: cargo build --release
-  - name: test
-    run: cargo test
 ```
 
 ## 3. Repository Input Formats
