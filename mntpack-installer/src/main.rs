@@ -14,7 +14,7 @@ use serde::Serialize;
 const APP_DIR: &str = ".mntpack";
 const MNTPACK_HOME_ENV: &str = "MNTPACK_HOME";
 const EMBEDDED_MNTPACK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/mntpack_payload.bin"));
-const MNTPACK_OWNER: &str = "MINTILER-DEV";
+const MNTPACK_OWNER: &str = "mntpack";
 const MNTPACK_REPO: &str = "mntpack";
 
 #[derive(Debug, Parser)]
@@ -278,7 +278,7 @@ fn package_binary_path(root: &Path, packages_dir: &Path) -> Result<PathBuf> {
 
 fn try_sync_with_existing_mntpack(root: &Path) -> Result<bool> {
     let status = Command::new("mntpack")
-        .args(["sync", "MINTILER-DEV/mntpack", "--name", "mntpack", "-g"])
+        .args(["sync", "mntpack/mntpack", "--name", "mntpack", "-g"])
         .env(MNTPACK_HOME_ENV, root)
         .status();
     match status {
@@ -290,7 +290,7 @@ fn try_sync_with_existing_mntpack(root: &Path) -> Result<bool> {
 
 fn sync_with_installed_mntpack(binary_path: &Path, root: &Path) -> Result<bool> {
     let status = Command::new(binary_path)
-        .args(["sync", "MINTILER-DEV/mntpack", "--name", "mntpack", "-g"])
+        .args(["sync", "mntpack/mntpack", "--name", "mntpack", "-g"])
         .env(MNTPACK_HOME_ENV, root)
         .status()
         .with_context(|| {

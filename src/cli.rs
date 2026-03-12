@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "mntpack", version, about = "MINTILER-DEV Package Manager")]
+#[command(name = "mntpack", version, about = "mntpack Package Manager")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

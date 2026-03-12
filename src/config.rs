@@ -102,7 +102,7 @@ impl Default for Config {
 }
 
 fn default_owner() -> String {
-    "MINTILER-DEV".to_string()
+    "mntpack".to_string()
 }
 
 #[derive(Debug, Clone)]

@@ -86,7 +86,7 @@ Installer behavior:
 - Installs `mntpack` as managed package `packages/mntpack`
 - Places payload in hash-backed store entries under `store/sha256/<hash>/...`
 - Creates `mntpack` shim in `.mntpack/bin`
-- Runs a post-install managed self-sync (`sync MINTILER-DEV/mntpack --name mntpack -g`)
+- Runs a post-install managed self-sync (`sync mntpack/mntpack --name mntpack -g`)
 - Adds `.mntpack/bin` to PATH (if missing)
 - Sets `MNTPACK_HOME` for custom install root support
 
@@ -185,7 +185,7 @@ mntpack run scalf
   - `sync` prompts for a custom name
 - You can always set an explicit name with `--name`
 - `mntpack` is a protected reserved package name:
-  - only `MINTILER-DEV/mntpack` can use package name `mntpack`
+  - only `mntpack/mntpack` can use package name `mntpack`
   - the `mntpack` package cannot be removed via `remove`/`uninstall`/`rm`/`unsync`
 
 ## Global Shims

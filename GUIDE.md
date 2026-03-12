@@ -19,7 +19,7 @@ The installer:
 - installs `mntpack` as package `packages/mntpack`,
 - stores mntpack payload in `store/sha256/<hash>/...`,
 - creates `mntpack` shim in `.mntpack/bin`,
-- runs a post-install managed self-sync for latest `MINTILER-DEV/mntpack`,
+- runs a post-install managed self-sync for latest `mntpack/mntpack`,
 - sets PATH and `MNTPACK_HOME`.
 
 ## 2. Core Commands
@@ -119,7 +119,7 @@ Behavior:
 - if a name is already used by a different installed package, `mntpack` asks for a custom name,
 - names are treated as occupied only when install succeeds (record exists),
 - if `sync` input matches an already-installed package name, `mntpack` updates that package.
-- `mntpack` is a protected package name (reserved for `MINTILER-DEV/mntpack` only).
+- `mntpack` is a protected package name (reserved for `mntpack/mntpack` only).
 
 ## 5. Updating
 
@@ -291,7 +291,7 @@ mntpack config get autoUpdateOnRun
 Set values:
 
 ```bash
-mntpack config set defaultOwner MINTILER-DEV
+mntpack config set defaultOwner mntpack
 mntpack config set autoUpdateOnRun true
 mntpack config set paths.cmake cmake
 mntpack config set paths.make make

@@ -17,7 +17,7 @@ use crate::{
 };
 
 const SPECIAL_PACKAGE_NAME: &str = "mntpack";
-const SPECIAL_OWNER: &str = "MINTILER-DEV";
+const SPECIAL_OWNER: &str = "mntpack";
 const SPECIAL_REPO: &str = "mntpack";
 
 pub fn execute(runtime: &RuntimeContext, input: &str) -> Result<()> {

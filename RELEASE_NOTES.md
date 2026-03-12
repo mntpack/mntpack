@@ -1,5 +1,14 @@
 # Release Notes
 
+## 0.6.2 - 2026-03-12
+
+### Changed
+- Updated core `mntpack` repository defaults from `MINTILER-DEV/mntpack` to `mntpack/mntpack`:
+  - default owner is now `mntpack`.
+  - protected `mntpack` package ownership checks now target `mntpack/mntpack`.
+  - installer self-sync now targets `mntpack/mntpack`.
+- Updated CLI/about text and docs to reflect the new canonical repository.
+
 ## 0.6.1 - 2026-03-12
 
 ### Added
