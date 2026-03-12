@@ -1,4 +1,5 @@
 mod binary_cache;
+mod build_recipe;
 mod cli;
 mod commands;
 mod config;
@@ -19,6 +20,9 @@ async fn main() -> Result<()> {
     let runtime = RuntimeContext::load_or_init()?;
 
     match cli.command {
+        Commands::Build { recipe, generate } => {
+            commands::build::execute(recipe.as_deref(), generate)?
+        }
         Commands::Sync {
             repo,
             version,

@@ -1,5 +1,18 @@
 # Release Notes
 
+## 0.6.0 - 2026-03-12
+
+### Added
+- New build recipe system with `mntpack build`:
+  - `mntpack build` loads `./mntpack.yml` by default.
+  - `mntpack build <file.yml>` runs an explicit recipe file.
+  - recipe steps run sequentially with same-line progress output.
+- Build recipe template generation:
+  - `mntpack build --generate` creates `./mntpack.yml`.
+  - `mntpack build --generate <file.yml>` writes a template to a custom path.
+  - generated templates include starter steps inferred from common project files (`Cargo.toml`, `package.json`, Python project files).
+- YAML recipe support via `serde_yaml` with per-recipe and per-step environment variables plus optional per-step working directory.
+
 ## 0.5.2 - 2026-03-11
 
 ### Added

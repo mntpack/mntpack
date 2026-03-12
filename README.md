@@ -93,6 +93,8 @@ Installer behavior:
 ## CLI Usage
 
 ```bash
+mntpack build [recipe.yml]
+mntpack build --generate [recipe.yml]
 mntpack sync <repo> [-v <tag_or_commit>] [-r <release_asset_file>] [-n <custom_name>] [-g]
 mntpack install <repo> [-v <tag_or_commit>] [-r <release_asset_file|auto>] [-n <custom_name>] [-g]
 mntpack add <repo> [-v <tag_or_commit>] [-r <release_asset_file>] [-n <custom_name>] [-g]
@@ -123,6 +125,30 @@ mntpack config show
 mntpack config get <key>
 mntpack config set <key> <value>
 mntpack config reset
+```
+
+## Build Recipes (`mntpack.yml`)
+
+`mntpack build` is a local recipe runner:
+
+- `mntpack build` uses `./mntpack.yml`
+- `mntpack build path/to/recipe.yml` uses a specific recipe file
+- `mntpack build --generate` creates `./mntpack.yml`
+- `mntpack build --generate path/to/recipe.yml` writes a template at a custom path
+
+Example recipe:
+
+```yaml
+version: 1
+name: my-project
+env:
+  RUSTFLAGS: -C debuginfo=0
+steps:
+  - name: build
+    run: cargo build --release
+  - name: tests
+    run: cargo test
+    cwd: .
 ```
 
 Examples:
