@@ -26,7 +26,6 @@ use crate::{
         manager::{InstallerManager, materialize_binary},
     },
     package::{
-        lockfile,
         manifest::Manifest,
         record::{
             PackageRecord, find_record_by_package_name, find_record_by_repo, load_record,
@@ -34,8 +33,8 @@ use crate::{
         },
         resolver::resolve_repo,
         store::{
-            executable_in_hash_store, hash_store_dir, hash_store_entry, normalize_hash,
-            require_binary_name, sha256_file, version_store_dir,
+            executable_in_hash_store, hash_store_dir, hash_store_entry, require_binary_name,
+            sha256_file, version_store_dir,
         },
     },
     shim::generator::{create_shim, ensure_bin_on_path},
@@ -56,7 +55,7 @@ pub async fn execute(
     global: bool,
 ) -> Result<()> {
     validate_release_version_constraints(version, release_asset)?;
-    let mut progress = ProgressBar::new("sync", 3);
+    let mut progress = ProgressBar::new("sync", 2);
 
     let mut effective_repo_input = repo_input.to_string();
     let mut effective_name = custom_name.map(ToString::to_string);
@@ -79,32 +78,18 @@ pub async fn execute(
         effective_name.as_deref(),
         global,
         &mut visited,
-        true,
     )
     .await?;
     progress.advance(format!("synced {}", record.package_name));
     if record.binary_hash.is_none() && record.run_command.is_none() {
         record = ensure_package_ready(runtime, &record.package_name).await?;
     }
-    if record.binary_hash.is_none() {
-        eprintln!(
-            "warning: '{}' has no binary hash; lockfile entry was not generated",
-            record.package_name
-        );
-    }
     progress.advance("prepared package");
-    refresh_lockfile(runtime)?;
     if let Err(err) = crate::sync_dispatch::dispatch_sync(runtime, &record, version).await {
         eprintln!("warning: failed to trigger sync dispatch workflow: {err}");
     }
-    progress.finish("lockfile updated");
+    progress.finish("ready");
     println!("synced {} ({})", record.package_name, record.repo_spec());
-    Ok(())
-}
-
-fn refresh_lockfile(runtime: &RuntimeContext) -> Result<()> {
-    let lock = lockfile::regenerate_from_installed(runtime)?;
-    lockfile::save_to_cwd(&lock)?;
     Ok(())
 }
 
@@ -117,22 +102,9 @@ pub async fn sync_package_internal(
     custom_name: Option<&str>,
     global: bool,
     visited: &mut HashSet<String>,
-    respect_lockfile: bool,
 ) -> Result<PackageRecord> {
     let resolved = resolve_repo(repo_input, &runtime.config.default_owner)?;
-    let lock_entry = if respect_lockfile {
-        lockfile::load_from_cwd()?.and_then(|lock| lock.packages.get(&resolved.key).cloned())
-    } else {
-        None
-    };
-    let lock_hash = lock_entry
-        .as_ref()
-        .map(|entry| normalize_hash(&entry.binary_hash));
-    let enforce_hash_match = lock_hash.is_some();
-    let effective_version = lock_entry
-        .as_ref()
-        .map(|entry| entry.commit.as_str())
-        .or(version);
+    let effective_version = version;
 
     if visited.contains(&resolved.key) {
         if let Some(record) =
@@ -170,8 +142,7 @@ pub async fn sync_package_internal(
     let preferred_shim_name = bin_command.as_ref().map(|(name, _)| name.clone());
 
     if let Some(manifest) = &manifest {
-        sync_dependencies_parallel(runtime, manifest.dependencies.clone(), respect_lockfile)
-            .await?;
+        sync_dependencies_parallel(runtime, manifest.dependencies.clone()).await?;
     }
 
     let mut installed_binary: Option<PathBuf> = None;
@@ -182,7 +153,7 @@ pub async fn sync_package_internal(
     let mut build_pending = true;
     let release_requested = release_asset.is_some();
     let mut release_installed = false;
-    let mut active_hash = lock_hash.clone();
+    let mut active_hash = None;
 
     if active_hash.is_none() {
         if let Some(existing) =
@@ -392,25 +363,6 @@ pub async fn sync_package_internal(
             println!(
                 "added '{}' to PATH for global shims",
                 runtime.paths.bin.display()
-            );
-        }
-    }
-
-    if enforce_hash_match {
-        let expected_hash = active_hash.unwrap_or_default();
-        if let Some(actual_hash) = binary_hash.as_deref() {
-            if normalize_hash(actual_hash) != normalize_hash(&expected_hash) {
-                bail!(
-                    "binary hash mismatch for '{}': expected sha256:{}, got sha256:{}",
-                    resolved.key,
-                    normalize_hash(&expected_hash),
-                    normalize_hash(actual_hash)
-                );
-            }
-        } else {
-            bail!(
-                "lockfile requires binary hash for '{}' but installation produced no binary",
-                resolved.key
             );
         }
     }
@@ -961,7 +913,6 @@ fn build_special_repo_binary(
 async fn sync_dependencies_parallel(
     runtime: &RuntimeContext,
     dependencies: Vec<String>,
-    respect_lockfile: bool,
 ) -> Result<()> {
     if dependencies.is_empty() {
         return Ok(());
@@ -979,7 +930,6 @@ async fn sync_dependencies_parallel(
                 None,
                 false,
                 &mut dependency_visited,
-                respect_lockfile,
             )
             .await
         });

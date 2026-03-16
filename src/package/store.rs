@@ -30,10 +30,6 @@ pub fn normalize_hash(hash: &str) -> String {
         .to_ascii_lowercase()
 }
 
-pub fn prefixed_hash(hash: &str) -> String {
-    format!("sha256:{}", normalize_hash(hash))
-}
-
 pub fn hash_store_dir(store_root: &Path, hash: &str) -> PathBuf {
     store_root.join("sha256").join(normalize_hash(hash))
 }

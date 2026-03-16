@@ -9,7 +9,6 @@ use anyhow::{Context, Result, bail};
 use crate::{
     config::RuntimeContext,
     package::{
-        lockfile,
         record::{PackageRecord, find_record_by_package_name, load_all_records},
         resolver::resolve_repo,
         store::sanitize_store_component,
@@ -41,7 +40,6 @@ pub fn execute(runtime: &RuntimeContext, input: &str) -> Result<()> {
         remove_installed_package(runtime, record)?;
     }
     cleanup_repo_directories(runtime, &targets)?;
-    refresh_lockfile_if_present(runtime)?;
 
     let mut names: Vec<String> = targets
         .iter()
@@ -49,15 +47,6 @@ pub fn execute(runtime: &RuntimeContext, input: &str) -> Result<()> {
         .collect();
     names.sort();
     println!("removed {} package(s): {}", targets.len(), names.join(", "));
-    Ok(())
-}
-
-fn refresh_lockfile_if_present(runtime: &RuntimeContext) -> Result<()> {
-    if lockfile::load_from_cwd()?.is_none() {
-        return Ok(());
-    }
-    let lock = lockfile::regenerate_from_installed(runtime)?;
-    lockfile::save_to_cwd(&lock)?;
     Ok(())
 }
 

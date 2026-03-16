@@ -49,7 +49,6 @@ mntpack inspect <repo>
 mntpack search <query...>
 mntpack prebuild
 mntpack why <package>
-mntpack lock regenerate
 mntpack doctor [--fix]
 ```
 
@@ -112,8 +111,7 @@ Update one package:
 mntpack update mytool
 ```
 
-`update <package>` uses the same sync pipeline for that package.
-`update` bypasses lock pinning and regenerates `mntpack.lock` from installed package records.
+`update` uses the same sync pipeline for that package.
 
 Release upgrades (latest release assets, not commit pull flow):
 
@@ -122,7 +120,7 @@ mntpack upgrade
 mntpack upgrade ripgrep
 ```
 
-`upgrade` also bypasses lock pinning and regenerates `mntpack.lock` after upgrade.
+`upgrade` uses release assets and then updates the installed package record.
 
 ## 5.1 Version Switching
 
@@ -309,21 +307,7 @@ Important config keys:
 - C/C++: `CMakeLists.txt` or `Makefile`/`makefile`
 - Generic: fallback with `mntpack.json` run/bin
 
-## 13.1 Lockfile and Binary Cache
-
-`mntpack` uses `mntpack.lock` in your current working directory for deterministic installs.
-
-Lock entries include:
-
-- repository (`owner/repo`)
-- commit
-- binary hash (`sha256:...`)
-
-Behavior:
-
-- `sync` reads lock entries and pins to exact commit/hash when available.
-- Hash mismatches during locked install abort the install.
-- `lock regenerate` rebuilds the lockfile from installed package records.
+## 13.1 Binary Cache
 
 Remote binary cache:
 

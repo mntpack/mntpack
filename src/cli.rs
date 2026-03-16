@@ -84,10 +84,6 @@ pub enum Commands {
     Why {
         package: String,
     },
-    Lock {
-        #[command(subcommand)]
-        action: LockAction,
-    },
     Doctor {
         #[arg(short = 'f', long = "fix")]
         fix: bool,
@@ -104,9 +100,4 @@ pub enum ConfigAction {
     Get { key: String },
     Set { key: String, value: String },
     Reset,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum LockAction {
-    Regenerate,
 }

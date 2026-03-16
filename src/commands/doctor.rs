@@ -106,7 +106,6 @@ pub async fn execute(runtime: &RuntimeContext, fix: bool) -> Result<()> {
                 Some(&record.package_name),
                 record.global,
                 &mut visited,
-                true,
             )
             .await?;
             repaired += 1;

@@ -11,7 +11,7 @@ mod ui;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands, LockAction};
+use cli::{Cli, Commands};
 use config::RuntimeContext;
 
 #[tokio::main]
@@ -77,9 +77,6 @@ async fn main() -> Result<()> {
         Commands::Search { query } => commands::search::execute(&query).await?,
         Commands::Prebuild => commands::prebuild::execute(&runtime).await?,
         Commands::Why { package } => commands::why::execute(&runtime, &package)?,
-        Commands::Lock { action } => match action {
-            LockAction::Regenerate => commands::lock::regenerate(&runtime)?,
-        },
         Commands::Doctor { fix } => commands::doctor::execute(&runtime, fix).await?,
         Commands::Config { action } => commands::config::execute(&runtime, action)?,
     }

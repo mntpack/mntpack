@@ -23,7 +23,6 @@ pub async fn execute(runtime: &RuntimeContext, package_name: &str, args: &[Strin
                 Some(&record.package_name),
                 record.global,
                 &mut visited,
-                true,
             )
             .await?;
         }

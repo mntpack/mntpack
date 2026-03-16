@@ -32,7 +32,6 @@ pub async fn execute(runtime: &RuntimeContext) -> Result<()> {
         None,
         false,
         &mut visited,
-        true,
     )
     .await?;
     progress.advance(format!("synced {}", synced.package_name));

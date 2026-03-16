@@ -15,7 +15,6 @@ It can clone/pull repositories, install from releases or source, create global s
 - Optional version/commit checkout (`-v/--version`)
 - Optional custom package name (`-n/--name`)
 - Release asset auto-detection (`-r auto` / `--release auto`)
-- Deterministic lockfile workflow (`mntpack.lock`) with commit and SHA256 pinning
 - Content-addressed store (`store/sha256/<hash>/<binary>`)
 - Remote binary cache support (`binaryCache` config + `mntpack prebuild`)
 - Conflict handling for package names (interactive prompt when needed)
@@ -117,7 +116,6 @@ mntpack inspect <repo>
 mntpack search <query...>
 mntpack prebuild
 mntpack why <package>
-mntpack lock regenerate
 mntpack doctor [--fix]
 mntpack config show
 mntpack config get <key>
@@ -171,18 +169,12 @@ mntpack run scalf
 - If `autoUpdateOnRun` is `true`, shims route through `mntpack run <package>`
 - If `autoUpdateOnRun` is `false`, shims execute package binaries directly when available
 
-## Store, Lockfile, And Lazy Build
+## Store And Lazy Build
 
 - Binaries are shared in `<MNTPACK_HOME>/store` and package folders link to them.
 - Primary store layout is `<MNTPACK_HOME>/store/sha256/<hash>/<binary>`.
 - Version aliases for `use` / `exec <package>@<version>` are tracked at:
   - `<MNTPACK_HOME>/store/versions/<repo>/<version-or-commit>/...`.
-- `mntpack.lock` is generated in the current working directory and stores:
-  - repository key (`owner/repo`)
-  - pinned commit
-  - pinned binary hash (`sha256:...`)
-- `sync` honors lock entries when present.
-- `update` / `upgrade` bypass lock pinning and regenerate lock entries from installed records.
 - `sync` is clone-first and marks packages for lazy preparation/build when needed.
 - `run` prepares/builds packages on-demand when artifacts are missing.
 - Git mirror cache is kept under `<MNTPACK_HOME>/cache/git`.
