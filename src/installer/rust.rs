@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::driver::{
-    DriverRuntime, InstallContext, InstallDriver, InstallResult, manifest_bin, run_command,
+    DriverRuntime, InstallContext, InstallDriver, InstallResult, manifest_bin,
+    manifest_uses_command_launch, run_command,
 };
 
 pub struct RustDriver;
@@ -31,6 +32,13 @@ impl InstallDriver for RustDriver {
             return Ok(InstallResult {
                 shim_name: infer_shim_name(&bin, &ctx.package_name),
                 binary_path: Some(bin),
+            });
+        }
+
+        if manifest_uses_command_launch(ctx) {
+            return Ok(InstallResult {
+                shim_name: ctx.package_name.clone(),
+                binary_path: None,
             });
         }
 

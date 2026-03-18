@@ -82,6 +82,15 @@ pub fn manifest_bin(ctx: &InstallContext) -> Result<PathBuf> {
     Ok(ctx.repo_path.join(bin))
 }
 
+pub fn manifest_uses_command_launch(ctx: &InstallContext) -> bool {
+    ctx.manifest
+        .as_ref()
+        .map(|manifest| {
+            manifest.resolve_run_command().is_some() || manifest.resolve_bin_command().is_some()
+        })
+        .unwrap_or(false)
+}
+
 fn format_command(program: &str, args: &[&str]) -> String {
     if args.is_empty() {
         return program.to_string();

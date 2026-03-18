@@ -7,7 +7,10 @@ use std::{
 use anyhow::{Context, Result, bail};
 use walkdir::WalkDir;
 
-use super::driver::{DriverRuntime, InstallContext, InstallDriver, InstallResult, run_command};
+use super::driver::{
+    DriverRuntime, InstallContext, InstallDriver, InstallResult, manifest_uses_command_launch,
+    run_command,
+};
 
 pub struct CppDriver;
 
@@ -21,29 +24,38 @@ impl InstallDriver for CppDriver {
     fn install(&self, ctx: &InstallContext, runtime: &DriverRuntime<'_>) -> Result<InstallResult> {
         let cmake_lists = ctx.repo_path.join("CMakeLists.txt");
         let use_cmake = cmake_lists.exists();
+        let uses_command_launch = manifest_uses_command_launch(ctx);
         let binary = if use_cmake {
-            build_with_cmake(ctx, runtime)?
+            build_with_cmake(ctx, runtime, uses_command_launch)?
         } else if ctx.repo_path.join("Makefile").exists() || ctx.repo_path.join("makefile").exists()
         {
-            build_with_make(ctx, runtime)?
+            build_with_make(ctx, runtime, uses_command_launch)?
         } else {
             bail!("cpp driver detected project but no cmake/make build file was found");
         };
 
         let shim_name = binary
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .map(|name| name.to_string())
+            .as_ref()
+            .and_then(|binary| {
+                binary
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.to_string())
+            })
             .unwrap_or_else(|| ctx.package_name.clone());
 
         Ok(InstallResult {
-            binary_path: Some(binary),
+            binary_path: binary,
             shim_name,
         })
     }
 }
 
-fn build_with_cmake(ctx: &InstallContext, runtime: &DriverRuntime<'_>) -> Result<PathBuf> {
+fn build_with_cmake(
+    ctx: &InstallContext,
+    runtime: &DriverRuntime<'_>,
+    uses_command_launch: bool,
+) -> Result<Option<PathBuf>> {
     let build_dir = ctx.repo_path.join(".mntpack-build");
     let cmake = &runtime.runtime.config.paths.cmake;
     run_command(
@@ -63,13 +75,24 @@ fn build_with_cmake(ctx: &InstallContext, runtime: &DriverRuntime<'_>) -> Result
         &ctx.repo_path,
     )?;
 
-    detect_binary(&[build_dir.join("Release"), build_dir], &ctx.package_name)
+    if uses_command_launch {
+        return Ok(None);
+    }
+
+    detect_binary(&[build_dir.join("Release"), build_dir], &ctx.package_name).map(Some)
 }
 
-fn build_with_make(ctx: &InstallContext, runtime: &DriverRuntime<'_>) -> Result<PathBuf> {
+fn build_with_make(
+    ctx: &InstallContext,
+    runtime: &DriverRuntime<'_>,
+    uses_command_launch: bool,
+) -> Result<Option<PathBuf>> {
     let make = &runtime.runtime.config.paths.make;
     run_command(make, &[], &ctx.repo_path)?;
-    detect_binary(&[ctx.repo_path.clone()], &ctx.package_name)
+    if uses_command_launch {
+        return Ok(None);
+    }
+    detect_binary(&[ctx.repo_path.clone()], &ctx.package_name).map(Some)
 }
 
 fn detect_binary(search_roots: &[PathBuf], package_name: &str) -> Result<PathBuf> {
