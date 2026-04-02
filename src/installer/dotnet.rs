@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 use crate::dotnet;
+use crate::package::manifest::Manifest;
 
 use super::driver::{
     DriverRuntime, InstallContext, InstallDriver, InstallResult, manifest_bin,
@@ -18,7 +19,7 @@ impl InstallDriver for DotnetDriver {
         dotnet::ensure_workspace_config(runtime.runtime, &ctx.repo_path, None)?;
 
         if let Some(manifest) = &ctx.manifest {
-            if !manifest.nuget.packages.is_empty() {
+            if should_apply_manifest_packages(manifest) {
                 dotnet::apply_manifest_packages(runtime.runtime, &ctx.repo_path, None, manifest)?;
             }
         }
@@ -60,6 +61,10 @@ impl InstallDriver for DotnetDriver {
     }
 }
 
+fn should_apply_manifest_packages(manifest: &Manifest) -> bool {
+    manifest.build.is_none() && !manifest.nuget.packages.is_empty()
+}
+
 fn infer_shim_name(binary: &std::path::Path, fallback: &str) -> String {
     binary
         .file_stem()
@@ -67,4 +72,36 @@ fn infer_shim_name(binary: &std::path::Path, fallback: &str) -> String {
         .map(|name| name.to_string())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| fallback.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::package::manifest::{Manifest, NugetConfig, NugetPackageSpec};
+
+    use super::should_apply_manifest_packages;
+
+    #[test]
+    fn applies_manifest_packages_without_custom_build() {
+        let manifest = Manifest {
+            nuget: NugetConfig {
+                packages: vec![NugetPackageSpec::Simple("Tooling@1.0.0".to_string())],
+            },
+            ..Manifest::default()
+        };
+
+        assert!(should_apply_manifest_packages(&manifest));
+    }
+
+    #[test]
+    fn skips_manifest_package_apply_when_custom_build_exists() {
+        let manifest = Manifest {
+            build: Some("dotnet build Tool.slnx".to_string()),
+            nuget: NugetConfig {
+                packages: vec![NugetPackageSpec::Simple("Tooling@1.0.0".to_string())],
+            },
+            ..Manifest::default()
+        };
+
+        assert!(!should_apply_manifest_packages(&manifest));
+    }
 }
