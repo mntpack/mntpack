@@ -117,7 +117,8 @@ pub struct AppPaths {
     pub cache_git: PathBuf,
     pub cache_exec: PathBuf,
     pub nuget: PathBuf,
-    pub nuget_source: PathBuf,
+    pub nuget_feed: PathBuf,
+    pub nuget_state: PathBuf,
     pub store: PathBuf,
     pub bin: PathBuf,
 }
@@ -147,8 +148,8 @@ impl AppPaths {
         preferred
     }
 
-    pub fn nuget_source_value(&self) -> String {
-        normalize_path_for_os(&self.nuget_source)
+    pub fn nuget_feed_value(&self) -> String {
+        normalize_path_for_os(&self.nuget_feed)
     }
 }
 
@@ -168,7 +169,8 @@ impl RuntimeContext {
         let cache_git = cache.join("git");
         let cache_exec = cache.join("exec");
         let nuget = root.join("nuget");
-        let nuget_source = nuget.join("source");
+        let nuget_feed = nuget.join("feed");
+        let nuget_state = nuget.join("state");
         let store = root.join("store");
         let bin = root.join("bin");
 
@@ -180,7 +182,8 @@ impl RuntimeContext {
             &cache_git,
             &cache_exec,
             &nuget,
-            &nuget_source,
+            &nuget_feed,
+            &nuget_state,
             &store,
             &bin,
         ] {
@@ -212,7 +215,8 @@ impl RuntimeContext {
                 cache_git,
                 cache_exec,
                 nuget,
-                nuget_source,
+                nuget_feed,
+                nuget_state,
                 store,
                 bin,
             },

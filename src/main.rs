@@ -5,6 +5,7 @@ mod config;
 mod dotnet;
 mod github;
 mod installer;
+mod nuget;
 mod package;
 mod shim;
 mod sync_dispatch;

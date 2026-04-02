@@ -11,11 +11,11 @@ use xmltree::{Element, EmitterConfig, XMLNode};
 
 use crate::{
     config::{RuntimeContext, normalize_path_for_os},
-    package::manifest::{Manifest, NugetPackage},
+    nuget::MNTPACK_LOCAL_SOURCE_KEY,
+    package::manifest::{Manifest, NugetPackage, NugetSourceDefinition},
 };
 
 pub const NUGET_CONFIG_FILE: &str = "NuGet.config";
-pub const MNTPACK_LOCAL_SOURCE_KEY: &str = "mntpack-local";
 
 #[derive(Debug, Clone, Default)]
 pub struct DotnetDiscovery {
@@ -26,18 +26,9 @@ pub struct DotnetDiscovery {
     pub has_global_json: bool,
 }
 
-impl DotnetDiscovery {
-    pub fn is_dotnet(&self) -> bool {
-        !self.solutions.is_empty()
-            || !self.projects.is_empty()
-            || self.has_directory_build_props
-            || self.has_directory_build_targets
-            || self.has_global_json
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct DotnetTarget {
+    pub search_root: PathBuf,
     pub workspace_root: PathBuf,
     pub solution: Option<PathBuf>,
     pub project: Option<PathBuf>,
@@ -51,46 +42,66 @@ pub struct NugetConfigUpdate {
     pub changed: bool,
 }
 
-pub fn discover(root: &Path) -> Result<DotnetDiscovery> {
-    let mut discovery = DotnetDiscovery::default();
+#[derive(Debug, Clone)]
+pub struct ProjectMetadata {
+    pub package_id: String,
+    pub version: Option<String>,
+    pub is_packable: bool,
+}
 
-    for entry in WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(should_visit)
-    {
-        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
+#[derive(Debug, Clone)]
+pub struct SourceProjectResolution {
+    pub working_root: PathBuf,
+    pub solution: Option<PathBuf>,
+    pub project: PathBuf,
+    pub metadata: ProjectMetadata,
+}
 
-        let file_name = entry.file_name().to_string_lossy();
-        let path = entry.path().to_path_buf();
+#[derive(Debug, Clone)]
+pub struct PackedPackageExpectation {
+    pub package_id: String,
+    pub version: String,
+}
 
-        if has_extension(entry.path(), "sln") || has_extension(entry.path(), "slnx") {
-            discovery.solutions.push(path);
-            continue;
-        }
-        if has_extension(entry.path(), "csproj") {
-            discovery.projects.push(path);
-            continue;
-        }
-        if file_name.eq_ignore_ascii_case("Directory.Build.props") {
-            discovery.has_directory_build_props = true;
-            continue;
-        }
-        if file_name.eq_ignore_ascii_case("Directory.Build.targets") {
-            discovery.has_directory_build_targets = true;
-            continue;
-        }
-        if file_name.eq_ignore_ascii_case("global.json") {
-            discovery.has_global_json = true;
-        }
+#[derive(Debug, Clone)]
+pub struct ProjectPackageReference {
+    pub name: String,
+    pub version: Option<String>,
+}
+
+pub trait DotnetRunner {
+    fn run(&self, cwd: &Path, args: &[String]) -> Result<()>;
+}
+
+pub struct SystemDotnetRunner<'a> {
+    runtime: &'a RuntimeContext,
+}
+
+impl<'a> SystemDotnetRunner<'a> {
+    pub fn new(runtime: &'a RuntimeContext) -> Self {
+        Self { runtime }
     }
+}
 
-    discovery.solutions.sort();
-    discovery.projects.sort();
-    Ok(discovery)
+impl DotnetRunner for SystemDotnetRunner<'_> {
+    fn run(&self, cwd: &Path, args: &[String]) -> Result<()> {
+        run_dotnet_command(self.runtime, cwd, args)
+    }
+}
+
+impl DotnetDiscovery {
+    pub fn is_dotnet(&self) -> bool {
+        !self.solutions.is_empty()
+            || !self.projects.is_empty()
+            || self.has_directory_build_props
+            || self.has_directory_build_targets
+            || self.has_global_json
+    }
+}
+
+pub fn discover(root: &Path) -> Result<DotnetDiscovery> {
+    let search_root = resolve_search_root(root);
+    discover_under(&search_root)
 }
 
 pub fn is_dotnet_project(root: &Path) -> bool {
@@ -111,13 +122,13 @@ pub fn build_hint(root: &Path, dotnet: &str) -> Result<Option<String>> {
 }
 
 pub fn ensure_local_feed(runtime: &RuntimeContext) -> Result<PathBuf> {
-    fs::create_dir_all(&runtime.paths.nuget_source).with_context(|| {
+    fs::create_dir_all(&runtime.paths.nuget_feed).with_context(|| {
         format!(
-            "failed to create local NuGet source {}",
-            runtime.paths.nuget_source.display()
+            "failed to create local NuGet feed {}",
+            runtime.paths.nuget_feed.display()
         )
     })?;
-    Ok(runtime.paths.nuget_source.clone())
+    Ok(runtime.paths.nuget_feed.clone())
 }
 
 pub fn ensure_workspace_config(
@@ -131,14 +142,8 @@ pub fn ensure_workspace_config(
 }
 
 pub fn resolve_build_target(root: &Path) -> Result<Option<PathBuf>> {
-    let discovery = discover(root)?;
-    if let Some(solution) = discovery.solutions.first() {
-        return Ok(Some(solution.clone()));
-    }
-    if let Some(project) = discovery.projects.first() {
-        return Ok(Some(project.clone()));
-    }
-    Ok(None)
+    let target = resolve_target(root, None, false)?;
+    Ok(target.solution.or(target.project))
 }
 
 pub fn resolve_target(
@@ -146,31 +151,33 @@ pub fn resolve_target(
     project_hint: Option<&Path>,
     require_project: bool,
 ) -> Result<DotnetTarget> {
-    let discovery = discover(root)?;
+    let search_root = resolve_search_root(root);
+    let discovery = discover_under(&search_root)?;
     if !discovery.is_dotnet() {
         bail!(
             "no .NET solution or project files were detected in {}",
-            root.display()
+            search_root.display()
         );
     }
 
-    let solution = discovery.solutions.first().cloned();
-    let project = select_project(root, &discovery, project_hint, require_project)?;
+    let solution = pick_solution(&search_root, &discovery, None)?;
+    let project = select_project(&search_root, &discovery, project_hint, require_project)?;
     let workspace_root = if let Some(solution) = solution.as_ref() {
         solution
             .parent()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| root.to_path_buf())
+            .unwrap_or_else(|| search_root.clone())
     } else if let Some(project) = project.as_ref() {
         project
             .parent()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| root.to_path_buf())
+            .unwrap_or_else(|| search_root.clone())
     } else {
-        root.to_path_buf()
+        search_root.clone()
     };
 
     Ok(DotnetTarget {
+        search_root,
         workspace_root,
         solution,
         project,
@@ -181,9 +188,8 @@ pub fn build(runtime: &RuntimeContext, root: &Path) -> Result<Option<PathBuf>> {
     let Some(target) = resolve_build_target(root)? else {
         return Ok(None);
     };
-
-    run_dotnet_command(
-        runtime,
+    let runner = SystemDotnetRunner::new(runtime);
+    runner.run(
         root,
         &[
             "build".to_string(),
@@ -192,7 +198,6 @@ pub fn build(runtime: &RuntimeContext, root: &Path) -> Result<Option<PathBuf>> {
             "Release".to_string(),
         ],
     )?;
-
     Ok(Some(target))
 }
 
@@ -204,9 +209,9 @@ pub fn restore(runtime: &RuntimeContext, root: &Path, project_hint: Option<&Path
             root.display()
         )
     })?;
-    run_dotnet_command(
-        runtime,
-        root,
+    let runner = SystemDotnetRunner::new(runtime);
+    runner.run(
+        &target.search_root,
         &["restore".to_string(), display_path(&restore_target)],
     )
 }
@@ -235,7 +240,8 @@ pub fn add_package_reference(
         args.push(source);
     }
 
-    run_dotnet_command(runtime, root, &args)?;
+    let runner = SystemDotnetRunner::new(runtime);
+    runner.run(&target.search_root, &args)?;
     Ok(project.clone())
 }
 
@@ -247,9 +253,9 @@ pub fn remove_package_reference(
 ) -> Result<PathBuf> {
     let target = resolve_target(root, project_hint, true)?;
     let project = target.project.as_ref().expect("project required");
-    run_dotnet_command(
-        runtime,
-        root,
+    let runner = SystemDotnetRunner::new(runtime);
+    runner.run(
+        &target.search_root,
         &[
             "remove".to_string(),
             display_path(project),
@@ -277,6 +283,203 @@ pub fn apply_manifest_packages(
 
     restore(runtime, root, project_hint)?;
     Ok(packages)
+}
+
+pub fn list_project_package_references(
+    root: &Path,
+    project_hint: Option<&Path>,
+) -> Result<Vec<ProjectPackageReference>> {
+    let target = resolve_target(root, project_hint, true)?;
+    let project = target.project.as_ref().expect("project required");
+    let document = read_xml_file(project)?;
+    let mut packages = Vec::new();
+
+    for child in &document.children {
+        let XMLNode::Element(group) = child else {
+            continue;
+        };
+        if group.name != "ItemGroup" {
+            continue;
+        }
+        for item in &group.children {
+            let XMLNode::Element(reference) = item else {
+                continue;
+            };
+            if reference.name != "PackageReference" {
+                continue;
+            }
+            let name = reference
+                .attributes
+                .get("Include")
+                .or_else(|| reference.attributes.get("Update"))
+                .cloned()
+                .unwrap_or_default();
+            if name.trim().is_empty() {
+                continue;
+            }
+            let version = reference
+                .attributes
+                .get("Version")
+                .cloned()
+                .or_else(|| child_text(reference, "Version"));
+            packages.push(ProjectPackageReference { name, version });
+        }
+    }
+
+    packages.sort_by(|a, b| a.name.cmp(&b.name).then(a.version.cmp(&b.version)));
+    Ok(packages)
+}
+
+pub fn resolve_source_project(
+    repo_root: &Path,
+    source_name: &str,
+    source: &NugetSourceDefinition,
+) -> Result<SourceProjectResolution> {
+    let working_root = resolve_source_working_root(repo_root, source)?;
+    let discovery = discover_under(&working_root)?;
+    if !discovery.is_dotnet() {
+        bail!(
+            "nuget source '{}' does not contain a .NET project under {}",
+            source_name,
+            working_root.display()
+        );
+    }
+
+    let solution = pick_solution(&working_root, &discovery, source.solution.as_deref())?;
+    let project = pick_source_project(&working_root, &discovery, source.project.as_deref())?;
+    let metadata = read_project_metadata(&project)?;
+
+    if !metadata.is_packable {
+        bail!(
+            "project '{}' for nuget source '{}' is not packable",
+            project.display(),
+            source_name
+        );
+    }
+
+    Ok(SourceProjectResolution {
+        working_root,
+        solution,
+        project,
+        metadata,
+    })
+}
+
+pub fn expected_packed_package(
+    _source_name: &str,
+    source: &NugetSourceDefinition,
+    resolution: &SourceProjectResolution,
+) -> PackedPackageExpectation {
+    let package_id = source
+        .package_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| resolution.metadata.package_id.clone());
+    let version = source
+        .version
+        .clone()
+        .or_else(|| resolution.metadata.version.clone())
+        .unwrap_or_else(|| "1.0.0".to_string());
+    PackedPackageExpectation {
+        package_id,
+        version,
+    }
+}
+
+pub fn pack_source_project(
+    runtime: &RuntimeContext,
+    resolution: &SourceProjectResolution,
+    source_name: &str,
+    source: &NugetSourceDefinition,
+    feed_path: &Path,
+) -> Result<PackedPackageExpectation> {
+    let runner = SystemDotnetRunner::new(runtime);
+    pack_source_project_with_runner(&runner, resolution, source_name, source, feed_path)
+}
+
+pub fn pack_source_project_with_runner(
+    runner: &dyn DotnetRunner,
+    resolution: &SourceProjectResolution,
+    source_name: &str,
+    source: &NugetSourceDefinition,
+    feed_path: &Path,
+) -> Result<PackedPackageExpectation> {
+    fs::create_dir_all(feed_path)
+        .with_context(|| format!("failed to create {}", feed_path.display()))?;
+
+    let configuration = source.configuration().to_string();
+    let expected = expected_packed_package(source_name, source, resolution);
+    let mut common_props = Vec::new();
+    if let Some(package_id) = source
+        .package_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        common_props.push(format!("-p:PackageId={}", package_id.trim()));
+    }
+    if let Some(version) = source
+        .version
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        common_props.push(format!("-p:PackageVersion={}", version.trim()));
+        common_props.push(format!("-p:Version={}", version.trim()));
+    }
+
+    let restore_target = resolution.project.clone();
+    let build_target = resolution.project.clone();
+    let pack_target = resolution.project.clone();
+
+    let restore_args = vec!["restore".to_string(), display_path(&restore_target)];
+    runner.run(&resolution.working_root, &restore_args)?;
+
+    let build_args = vec![
+        "build".to_string(),
+        display_path(&build_target),
+        "--configuration".to_string(),
+        configuration.clone(),
+    ];
+    runner.run(&resolution.working_root, &build_args)?;
+
+    let mut pack_args = vec![
+        "pack".to_string(),
+        display_path(&pack_target),
+        "--configuration".to_string(),
+        configuration,
+        "--output".to_string(),
+        feed_path.to_string_lossy().to_string(),
+        "--no-build".to_string(),
+    ];
+    pack_args.extend(common_props);
+    runner.run(&resolution.working_root, &pack_args)?;
+
+    Ok(expected)
+}
+
+pub fn read_project_metadata(project_path: &Path) -> Result<ProjectMetadata> {
+    let document = read_xml_file(project_path)?;
+    let fallback_name = project_path
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .unwrap_or("Package")
+        .to_string();
+
+    let package_id = find_property(&document, "PackageId")
+        .or_else(|| find_property(&document, "AssemblyName"))
+        .unwrap_or_else(|| fallback_name.clone());
+    let version =
+        find_property(&document, "PackageVersion").or_else(|| find_property(&document, "Version"));
+    let is_packable = find_property(&document, "IsPackable")
+        .map(|value| !value.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
+
+    Ok(ProjectMetadata {
+        package_id,
+        version,
+        is_packable,
+    })
 }
 
 pub fn ensure_nuget_config(workspace_root: &Path, feed_path: &Path) -> Result<NugetConfigUpdate> {
@@ -361,6 +564,162 @@ pub fn ensure_nuget_config(workspace_root: &Path, feed_path: &Path) -> Result<Nu
     })
 }
 
+fn discover_under(root: &Path) -> Result<DotnetDiscovery> {
+    let mut discovery = DotnetDiscovery::default();
+
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(should_visit)
+    {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let file_name = entry.file_name().to_string_lossy();
+        let path = entry.path().to_path_buf();
+
+        if has_extension(entry.path(), "sln") || has_extension(entry.path(), "slnx") {
+            discovery.solutions.push(path);
+            continue;
+        }
+        if has_extension(entry.path(), "csproj") {
+            discovery.projects.push(path);
+            continue;
+        }
+        if file_name.eq_ignore_ascii_case("Directory.Build.props") {
+            discovery.has_directory_build_props = true;
+            continue;
+        }
+        if file_name.eq_ignore_ascii_case("Directory.Build.targets") {
+            discovery.has_directory_build_targets = true;
+            continue;
+        }
+        if file_name.eq_ignore_ascii_case("global.json") {
+            discovery.has_global_json = true;
+        }
+    }
+
+    discovery.solutions.sort();
+    discovery.projects.sort();
+    Ok(discovery)
+}
+
+fn resolve_search_root(root: &Path) -> PathBuf {
+    let base = if root.is_file() {
+        root.parent().unwrap_or(root)
+    } else {
+        root
+    };
+
+    for ancestor in base.ancestors() {
+        if has_direct_dotnet_indicators(ancestor) {
+            return ancestor.to_path_buf();
+        }
+    }
+    base.to_path_buf()
+}
+
+fn has_direct_dotnet_indicators(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if has_extension(&path, "csproj")
+            || has_extension(&path, "sln")
+            || has_extension(&path, "slnx")
+            || file_name.eq_ignore_ascii_case("Directory.Build.props")
+            || file_name.eq_ignore_ascii_case("Directory.Build.targets")
+            || file_name.eq_ignore_ascii_case("global.json")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn resolve_source_working_root(
+    repo_root: &Path,
+    source: &NugetSourceDefinition,
+) -> Result<PathBuf> {
+    let Some(subdir) = source
+        .subdir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(repo_root.to_path_buf());
+    };
+    let path = resolve_explicit_path(repo_root, repo_root, subdir)?;
+    if !path.is_dir() {
+        bail!(
+            "nuget source subdir '{}' is not a directory",
+            path.display()
+        );
+    }
+    Ok(path)
+}
+
+fn pick_solution(
+    repo_root: &Path,
+    discovery: &DotnetDiscovery,
+    solution_hint: Option<&str>,
+) -> Result<Option<PathBuf>> {
+    if let Some(solution_hint) = solution_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let candidate = resolve_explicit_path(repo_root, repo_root, solution_hint)?;
+        if !candidate.exists() {
+            bail!("solution file not found at {}", candidate.display());
+        }
+        if !(has_extension(&candidate, "sln") || has_extension(&candidate, "slnx")) {
+            bail!("solution path must point to a .sln or .slnx file");
+        }
+        return Ok(Some(candidate));
+    }
+
+    match discovery.solutions.len() {
+        0 => Ok(None),
+        _ => Ok(discovery.solutions.first().cloned()),
+    }
+}
+
+fn pick_source_project(
+    repo_root: &Path,
+    discovery: &DotnetDiscovery,
+    project_hint: Option<&str>,
+) -> Result<PathBuf> {
+    if let Some(project_hint) = project_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let candidate = resolve_explicit_path(repo_root, repo_root, project_hint)?;
+        if !candidate.exists() {
+            bail!("project file not found at {}", candidate.display());
+        }
+        if !has_extension(&candidate, "csproj") {
+            bail!("project path must point to a .csproj file");
+        }
+        return Ok(candidate);
+    }
+
+    match discovery.projects.len() {
+        0 => bail!("no .csproj file was detected under {}", repo_root.display()),
+        1 => Ok(discovery.projects.first().cloned().expect("single project")),
+        _ => bail!(
+            "multiple .csproj files were detected under {}. set 'project' in mntpack.json for this nuget source",
+            repo_root.display()
+        ),
+    }
+}
+
 fn select_project(
     root: &Path,
     discovery: &DotnetDiscovery,
@@ -395,6 +754,47 @@ fn select_project(
         ),
         _ => Ok(discovery.projects.first().cloned()),
     }
+}
+
+fn resolve_explicit_path(base_root: &Path, working_root: &Path, value: &str) -> Result<PathBuf> {
+    let candidate = PathBuf::from(value);
+    if candidate.is_absolute() {
+        return Ok(candidate);
+    }
+    let working_candidate = working_root.join(&candidate);
+    if working_candidate.exists() {
+        return Ok(working_candidate);
+    }
+    Ok(base_root.join(candidate))
+}
+
+fn read_xml_file(path: &Path) -> Result<Element> {
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    Element::parse(content.as_bytes())
+        .with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn find_property(document: &Element, property_name: &str) -> Option<String> {
+    for child in &document.children {
+        let XMLNode::Element(group) = child else {
+            continue;
+        };
+        if group.name != "PropertyGroup" {
+            continue;
+        }
+        if let Some(value) = child_text(group, property_name) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn child_text(element: &Element, name: &str) -> Option<String> {
+    element
+        .get_child(name)
+        .and_then(Element::get_text)
+        .map(|text| text.to_string())
 }
 
 fn run_dotnet_command(runtime: &RuntimeContext, cwd: &Path, args: &[String]) -> Result<()> {
@@ -476,11 +876,35 @@ fn has_extension(path: &Path, extension: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{cell::RefCell, fs, path::Path};
 
+    use anyhow::Result;
     use tempfile::tempdir;
 
-    use super::{MNTPACK_LOCAL_SOURCE_KEY, discover, ensure_nuget_config};
+    use super::{
+        DotnetRunner, MNTPACK_LOCAL_SOURCE_KEY, NugetSourceDefinition, ProjectMetadata, discover,
+        ensure_nuget_config, pack_source_project_with_runner, read_project_metadata,
+        resolve_source_project, resolve_target,
+    };
+
+    struct RecordingRunner {
+        calls: RefCell<Vec<Vec<String>>>,
+    }
+
+    impl RecordingRunner {
+        fn new() -> Self {
+            Self {
+                calls: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl DotnetRunner for RecordingRunner {
+        fn run(&self, _cwd: &Path, args: &[String]) -> Result<()> {
+            self.calls.borrow_mut().push(args.to_vec());
+            Ok(())
+        }
+    }
 
     #[test]
     fn discovery_detects_dotnet_indicators() {
@@ -512,7 +936,7 @@ mod tests {
         )
         .expect("seed config");
 
-        let feed = temp.path().join(".mntpack").join("nuget").join("source");
+        let feed = temp.path().join(".mntpack").join("nuget").join("feed");
         let update = ensure_nuget_config(temp.path(), &feed).expect("update config");
         let content = fs::read_to_string(config_path).expect("read config");
 
@@ -520,5 +944,113 @@ mod tests {
         assert_eq!(update.source_key, MNTPACK_LOCAL_SOURCE_KEY);
         assert!(content.contains("nuget.org"));
         assert!(content.contains(MNTPACK_LOCAL_SOURCE_KEY));
+    }
+
+    #[test]
+    fn resolves_search_root_from_nested_directory() {
+        let temp = tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src").join("Tool").join("Features")).expect("dirs");
+        fs::write(temp.path().join("src").join("Tool").join("Tool.csproj"), "").expect("project");
+
+        let target = resolve_target(
+            &temp.path().join("src").join("Tool").join("Features"),
+            None,
+            true,
+        )
+        .expect("target");
+        assert!(
+            target
+                .project
+                .as_ref()
+                .expect("project")
+                .ends_with("Tool.csproj")
+        );
+    }
+
+    #[test]
+    fn reads_project_metadata_from_csproj() {
+        let temp = tempdir().expect("tempdir");
+        let project = temp.path().join("Tool.csproj");
+        fs::write(
+            &project,
+            r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>Fancy.Tool</PackageId>
+    <Version>2.0.1</Version>
+  </PropertyGroup>
+</Project>"#,
+        )
+        .expect("project");
+
+        let metadata = read_project_metadata(&project).expect("metadata");
+        assert_eq!(metadata.package_id, "Fancy.Tool");
+        assert_eq!(metadata.version.as_deref(), Some("2.0.1"));
+    }
+
+    #[test]
+    fn source_project_resolution_requires_explicit_project_when_ambiguous() {
+        let temp = tempdir().expect("tempdir");
+        fs::write(temp.path().join("A.csproj"), "").expect("a");
+        fs::write(temp.path().join("B.csproj"), "").expect("b");
+
+        let err = resolve_source_project(
+            temp.path(),
+            "Test",
+            &NugetSourceDefinition {
+                repo: "owner/repo".to_string(),
+                ..NugetSourceDefinition::default()
+            },
+        )
+        .expect_err("expected ambiguity");
+        assert!(err.to_string().contains("multiple .csproj"));
+    }
+
+    #[test]
+    fn pack_orchestration_uses_restore_build_pack() {
+        let temp = tempdir().expect("tempdir");
+        let project = temp.path().join("Tool.csproj");
+        fs::write(
+            &project,
+            r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>Tool</PackageId>
+  </PropertyGroup>
+</Project>"#,
+        )
+        .expect("project");
+
+        let resolution = super::SourceProjectResolution {
+            working_root: temp.path().to_path_buf(),
+            solution: None,
+            project: project.clone(),
+            metadata: ProjectMetadata {
+                package_id: "Tool".to_string(),
+                version: Some("1.0.0".to_string()),
+                is_packable: true,
+            },
+        };
+        let runner = RecordingRunner::new();
+        let expectation = pack_source_project_with_runner(
+            &runner,
+            &resolution,
+            "Tool",
+            &NugetSourceDefinition {
+                repo: "owner/repo".to_string(),
+                version: Some("1.0.0-local.1".to_string()),
+                ..NugetSourceDefinition::default()
+            },
+            &temp.path().join("feed"),
+        )
+        .expect("pack");
+
+        assert_eq!(expectation.package_id, "Tool");
+        assert_eq!(expectation.version, "1.0.0-local.1");
+        let calls = runner.calls.borrow();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0][0], "restore");
+        assert_eq!(calls[1][0], "build");
+        assert_eq!(calls[2][0], "pack");
     }
 }

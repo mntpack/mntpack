@@ -110,6 +110,21 @@ pub enum ConfigAction {
 
 #[derive(Debug, Subcommand)]
 pub enum NugetAction {
+    #[command(alias = "ensure")]
+    Init {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+    },
+    Feed {
+        #[command(subcommand)]
+        action: NugetFeedAction,
+    },
+    Source {
+        #[command(subcommand)]
+        action: NugetSourceAction,
+    },
     Add {
         package: String,
         version: Option<String>,
@@ -119,6 +134,22 @@ pub enum NugetAction {
         path: Option<PathBuf>,
         #[arg(long = "project")]
         project: Option<PathBuf>,
+        #[arg(long = "no-restore")]
+        no_restore: bool,
+        #[arg(long = "build")]
+        build: bool,
+    },
+    Use {
+        package: String,
+        version: Option<String>,
+        #[arg(long = "source")]
+        source: Option<String>,
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+        #[arg(long = "no-restore")]
+        no_restore: bool,
         #[arg(long = "build")]
         build: bool,
     },
@@ -128,21 +159,18 @@ pub enum NugetAction {
         path: Option<PathBuf>,
         #[arg(long = "project")]
         project: Option<PathBuf>,
+        #[arg(long = "no-restore")]
+        no_restore: bool,
         #[arg(long = "build")]
         build: bool,
     },
     List {
         #[arg(long = "path")]
         path: Option<PathBuf>,
-    },
-    Install {
-        #[arg(long = "path")]
-        path: Option<PathBuf>,
         #[arg(long = "project")]
         project: Option<PathBuf>,
-        #[arg(long = "build")]
-        build: bool,
     },
+    #[command(alias = "install")]
     Apply {
         #[arg(long = "path")]
         path: Option<PathBuf>,
@@ -159,10 +187,131 @@ pub enum NugetAction {
         #[arg(long = "build")]
         build: bool,
     },
-    Ensure {
-        #[arg(long = "path")]
-        path: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NugetFeedAction {
+    Path,
+    List,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NugetSourceAction {
+    Add {
+        name: String,
+        #[arg(long = "repo")]
+        repo: String,
+        #[arg(long = "ref")]
+        reference: Option<String>,
+        #[arg(long = "subdir")]
+        subdir: Option<PathBuf>,
         #[arg(long = "project")]
         project: Option<PathBuf>,
+        #[arg(long = "solution")]
+        solution: Option<PathBuf>,
+        #[arg(long = "package-id")]
+        package_id: Option<String>,
+        #[arg(long = "version")]
+        version: Option<String>,
+        #[arg(long = "configuration")]
+        configuration: Option<String>,
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "auto-build")]
+        auto_build: bool,
     },
+    List {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+    },
+    Build {
+        name: String,
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "force")]
+        force: bool,
+    },
+    BuildAll {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "force")]
+        force: bool,
+    },
+    Update {
+        name: String,
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+    },
+    Sync {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "force")]
+        force: bool,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Commands, NugetAction, NugetFeedAction, NugetSourceAction};
+
+    #[test]
+    fn parses_nuget_source_add_command() {
+        let cli = Cli::try_parse_from([
+            "mntpack",
+            "nuget",
+            "source",
+            "add",
+            "CS2Luau.Roblox",
+            "--repo",
+            "owner/repo",
+            "--project",
+            "src/CS2Luau.Roblox/CS2Luau.Roblox.csproj",
+            "--package-id",
+            "CS2Luau.Roblox",
+        ])
+        .expect("parse cli");
+
+        match cli.command {
+            Commands::Nuget {
+                action:
+                    NugetAction::Source {
+                        action: NugetSourceAction::Add { name, repo, .. },
+                    },
+            } => {
+                assert_eq!(name, "CS2Luau.Roblox");
+                assert_eq!(repo, "owner/repo");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_nuget_feed_list_command() {
+        let cli = Cli::try_parse_from(["mntpack", "nuget", "feed", "list"]).expect("parse cli");
+
+        match cli.command {
+            Commands::Nuget {
+                action:
+                    NugetAction::Feed {
+                        action: NugetFeedAction::List,
+                    },
+            } => {}
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_nuget_use_command() {
+        let cli =
+            Cli::try_parse_from(["mntpack", "nuget", "use", "CS2Luau.Roblox"]).expect("parse cli");
+
+        match cli.command {
+            Commands::Nuget {
+                action: NugetAction::Use { package, .. },
+            } => assert_eq!(package, "CS2Luau.Roblox"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
 }

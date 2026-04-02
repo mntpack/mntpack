@@ -18,7 +18,7 @@ impl InstallDriver for DotnetDriver {
         dotnet::ensure_workspace_config(runtime.runtime, &ctx.repo_path, None)?;
 
         if let Some(manifest) = &ctx.manifest {
-            if !manifest.nuget.is_empty() {
+            if !manifest.nuget.packages.is_empty() {
                 dotnet::apply_manifest_packages(runtime.runtime, &ctx.repo_path, None, manifest)?;
             }
         }

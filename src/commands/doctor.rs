@@ -18,7 +18,8 @@ pub async fn execute(runtime: &RuntimeContext, fix: bool) -> Result<()> {
     println!("store\t{}", runtime.paths.store.display());
     println!("cache\t{}", runtime.paths.cache.display());
     println!("nuget\t{}", runtime.paths.nuget.display());
-    println!("nuget-source\t{}", runtime.paths.nuget_source.display());
+    println!("nuget-feed\t{}", runtime.paths.nuget_feed.display());
+    println!("nuget-state\t{}", runtime.paths.nuget_state.display());
 
     let checks = [
         ("git", runtime.config.paths.git.as_str()),

@@ -1,11 +1,11 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
 const MANIFEST_FILE: &str = "mntpack.json";
@@ -18,6 +18,7 @@ pub struct ReleaseAssetConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NugetPackageDeclaration {
+    #[serde(rename = "name", alias = "id")]
     pub id: String,
     pub version: Option<String>,
     pub source: Option<String>,
@@ -46,6 +47,30 @@ pub enum BinConfig {
 
 pub type NugetPackage = NugetPackageDeclaration;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NugetConfig {
+    pub packages: Vec<NugetPackageSpec>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NugetSourceDefinition {
+    #[serde(rename = "type", default = "default_nuget_source_type")]
+    pub source_type: String,
+    pub repo: String,
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    pub subdir: Option<String>,
+    pub project: Option<String>,
+    pub solution: Option<String>,
+    pub package_id: Option<String>,
+    pub version: Option<String>,
+    pub configuration: Option<String>,
+    pub output_mode: Option<String>,
+    pub auto_build: Option<bool>,
+    pub auto_update: Option<bool>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Manifest {
     pub name: Option<String>,
@@ -55,7 +80,9 @@ pub struct Manifest {
     #[serde(default)]
     pub dependencies: Vec<String>,
     #[serde(default)]
-    pub nuget: Vec<NugetPackageSpec>,
+    pub nuget: NugetConfig,
+    #[serde(default, rename = "nugetSources")]
+    pub nuget_sources: BTreeMap<String, NugetSourceDefinition>,
     pub build: Option<String>,
     pub bin: Option<BinConfig>,
     pub run: Option<RunConfig>,
@@ -108,9 +135,14 @@ impl Manifest {
 
     pub fn resolved_nuget_packages(&self) -> Vec<NugetPackage> {
         self.nuget
+            .packages
             .iter()
             .filter_map(NugetPackage::from_spec)
             .collect()
+    }
+
+    pub fn nuget_source_definitions(&self) -> &BTreeMap<String, NugetSourceDefinition> {
+        &self.nuget_sources
     }
 }
 
@@ -163,10 +195,70 @@ impl NugetPackage {
         if source.is_empty() {
             return None;
         }
-        if source.eq_ignore_ascii_case(crate::dotnet::MNTPACK_LOCAL_SOURCE_KEY) {
-            return Some(runtime.paths.nuget_source_value());
+        if source.eq_ignore_ascii_case(crate::nuget::MNTPACK_LOCAL_SOURCE_KEY) {
+            return Some(runtime.paths.nuget_feed_value());
         }
         Some(source.to_string())
+    }
+}
+
+impl NugetSourceDefinition {
+    pub fn package_id<'a>(&'a self, source_name: &'a str) -> &'a str {
+        self.package_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(source_name)
+    }
+
+    pub fn configuration(&self) -> &str {
+        self.configuration
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Release")
+    }
+
+    pub fn output_mode(&self) -> &str {
+        self.output_mode
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("feed")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum NugetConfigRepr {
+    Legacy(Vec<NugetPackageSpec>),
+    Structured { packages: Vec<NugetPackageSpec> },
+}
+
+impl Serialize for NugetConfig {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = Map::new();
+        state.insert(
+            "packages".to_string(),
+            serde_json::to_value(&self.packages).map_err(serde::ser::Error::custom)?,
+        );
+        Value::Object(state).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for NugetConfig {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let repr = Option::<NugetConfigRepr>::deserialize(deserializer)?;
+        Ok(match repr {
+            Some(NugetConfigRepr::Legacy(packages)) => Self { packages },
+            Some(NugetConfigRepr::Structured { packages }) => Self { packages },
+            None => Self::default(),
+        })
     }
 }
 
@@ -180,12 +272,10 @@ pub fn upsert_nuget_package(root: &Path, package: &NugetPackage) -> Result<bool>
     let object = document.as_object_mut().ok_or_else(|| {
         anyhow::anyhow!("{} must contain a JSON object at the root", path.display())
     })?;
-    let packages = object
+    let packages_value = object
         .entry("nuget".to_string())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let entries = packages
-        .as_array_mut()
-        .ok_or_else(|| anyhow::anyhow!("'nuget' in {} must be an array", path.display()))?;
+        .or_insert_with(|| json!({ "packages": [] }));
+    let entries = get_or_insert_packages_array(packages_value, &path)?;
 
     let mut changed = false;
     let mut replaced = false;
@@ -226,12 +316,10 @@ pub fn remove_nuget_package(root: &Path, package_id: &str) -> Result<bool> {
     let object = document.as_object_mut().ok_or_else(|| {
         anyhow::anyhow!("{} must contain a JSON object at the root", path.display())
     })?;
-    let Some(packages) = object.get_mut("nuget") else {
+    let Some(packages_value) = object.get_mut("nuget") else {
         return Ok(false);
     };
-    let entries = packages
-        .as_array_mut()
-        .ok_or_else(|| anyhow::anyhow!("'nuget' in {} must be an array", path.display()))?;
+    let entries = get_or_insert_packages_array(packages_value, &path)?;
 
     let before = entries.len();
     entries.retain(|entry| {
@@ -251,9 +339,61 @@ pub fn remove_nuget_package(root: &Path, package_id: &str) -> Result<bool> {
     Ok(true)
 }
 
+pub fn upsert_nuget_source(
+    root: &Path,
+    source_name: &str,
+    source: &NugetSourceDefinition,
+) -> Result<bool> {
+    let path = manifest_path(root);
+    let mut document = read_manifest_document(&path)?;
+    let object = document.as_object_mut().ok_or_else(|| {
+        anyhow::anyhow!("{} must contain a JSON object at the root", path.display())
+    })?;
+    let sources = object
+        .entry("nugetSources".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let source_map = sources
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("'nugetSources' in {} must be an object", path.display()))?;
+    let new_value = serde_json::to_value(source)?;
+
+    let changed = match source_map.get(source_name) {
+        Some(existing) if *existing == new_value => false,
+        _ => {
+            source_map.insert(source_name.to_string(), new_value);
+            true
+        }
+    };
+
+    if changed || !path.exists() {
+        write_manifest_document(&path, &document)?;
+    }
+
+    Ok(changed)
+}
+
+fn get_or_insert_packages_array<'a>(
+    nuget_value: &'a mut Value,
+    path: &Path,
+) -> Result<&'a mut Vec<Value>> {
+    if nuget_value.is_array() {
+        let packages = nuget_value.take();
+        *nuget_value = json!({ "packages": packages });
+    }
+
+    let packages = nuget_value
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("'nuget' in {} must be an object or array", path.display()))?
+        .entry("packages".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    packages
+        .as_array_mut()
+        .ok_or_else(|| anyhow::anyhow!("'nuget.packages' in {} must be an array", path.display()))
+}
+
 fn package_to_value(package: &NugetPackage) -> Value {
     json!({
-        "id": package.id,
+        "name": package.id,
         "version": package.version,
         "source": package.source,
     })
@@ -263,6 +403,10 @@ fn parse_value_as_nuget_package(value: &Value) -> Option<NugetPackage> {
     serde_json::from_value::<NugetPackageSpec>(value.clone())
         .ok()
         .and_then(|spec| NugetPackage::from_spec(&spec))
+}
+
+fn default_nuget_source_type() -> String {
+    "github".to_string()
 }
 
 fn read_manifest_document(path: &Path) -> Result<Value> {
@@ -302,21 +446,23 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        Manifest, NugetPackage, NugetPackageDeclaration, NugetPackageSpec, remove_nuget_package,
-        upsert_nuget_package,
+        Manifest, NugetConfig, NugetPackage, NugetPackageDeclaration, NugetPackageSpec,
+        NugetSourceDefinition, remove_nuget_package, upsert_nuget_package, upsert_nuget_source,
     };
 
     #[test]
     fn resolves_nuget_packages_from_mixed_specs() {
         let manifest = Manifest {
-            nuget: vec![
-                NugetPackageSpec::Simple("Newtonsoft.Json@13.0.3".to_string()),
-                NugetPackageSpec::Detailed(NugetPackageDeclaration {
-                    id: "Serilog".to_string(),
-                    version: Some("4.0.0".to_string()),
-                    source: Some("mntpack-local".to_string()),
-                }),
-            ],
+            nuget: NugetConfig {
+                packages: vec![
+                    NugetPackageSpec::Simple("Newtonsoft.Json@13.0.3".to_string()),
+                    NugetPackageSpec::Detailed(NugetPackageDeclaration {
+                        id: "Serilog".to_string(),
+                        version: Some("4.0.0".to_string()),
+                        source: Some("mntpack-local".to_string()),
+                    }),
+                ],
+            },
             ..Manifest::default()
         };
 
@@ -339,9 +485,43 @@ mod tests {
         assert!(upsert_nuget_package(temp.path(), &package).expect("upsert"));
         let content = fs::read_to_string(temp.path().join("mntpack.json")).expect("read");
         assert!(content.contains("Newtonsoft.Json"));
+        assert!(content.contains("\"packages\""));
 
         assert!(remove_nuget_package(temp.path(), "Newtonsoft.Json").expect("remove"));
         let content = fs::read_to_string(temp.path().join("mntpack.json")).expect("read");
         assert!(!content.contains("Newtonsoft.Json"));
+    }
+
+    #[test]
+    fn parses_legacy_array_shape_for_nuget_packages() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{
+  "nuget": [
+    { "id": "Newtonsoft.Json", "version": "13.0.3" }
+  ]
+}"#,
+        )
+        .expect("parse manifest");
+
+        let packages = manifest.resolved_nuget_packages();
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].id, "Newtonsoft.Json");
+    }
+
+    #[test]
+    fn upsert_nuget_source_updates_manifest_file() {
+        let temp = tempdir().expect("tempdir");
+        let source = NugetSourceDefinition {
+            repo: "owner/repo".to_string(),
+            project: Some("src/Tool/Tool.csproj".to_string()),
+            package_id: Some("Tool".to_string()),
+            version: Some("1.0.0-local.1".to_string()),
+            ..NugetSourceDefinition::default()
+        };
+
+        assert!(upsert_nuget_source(temp.path(), "Tool", &source).expect("upsert source"));
+        let content = fs::read_to_string(temp.path().join("mntpack.json")).expect("read");
+        assert!(content.contains("\"nugetSources\""));
+        assert!(content.contains("\"Tool\""));
     }
 }
