@@ -1,11 +1,12 @@
-# mntpack 0.6.8 (2026-04-02)
+# mntpack 0.6.9 (2026-04-02)
 
 ## Added
-- First-class `.NET` / C# project detection for `*.csproj`, `*.sln`, `*.slnx`, `Directory.Build.*`, and `global.json`.
-- Managed local NuGet feed support under `<MNTPACK_HOME>/nuget/source`.
-- New `mntpack nuget ...` commands to ensure `NuGet.config`, add/remove/list package declarations, and apply/restore packages from `mntpack.json`.
+- Source-backed NuGet package workflows with `mntpack nuget source add/list/build/build-all/update/sync`.
+- Managed local feed state and package inspection via `mntpack nuget feed path` and `mntpack nuget feed list`.
+- `mntpack nuget init` and `mntpack nuget use` for smoother consumer-project setup and lazy local-package builds.
+- `mntpack.json` support for `nugetSources` plus structured consumer package declarations under `nuget.packages`.
 
 ## Changed
-- Detected `.NET` repositories now ensure a project-local `NuGet.config` includes the managed `mntpack-local` feed.
-- `mntpack.json` now supports a `nuget` field for declarative NuGet package requirements.
-- `.NET` installs/builds prefer `dotnet build` on the detected solution and otherwise target the detected project in Release mode.
+- The managed local NuGet feed now lives at `<MNTPACK_HOME>/nuget/feed` with source-package state tracked in `<MNTPACK_HOME>/nuget/state`.
+- Source package builds now clone/update GitHub repos, detect the target C# project, run `dotnet restore/build/pack`, and publish `.nupkg` output into the local feed.
+- Consumer-side `nuget add/apply/use` commands now auto-build registered local source packages when the requested package is missing from the feed.

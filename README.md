@@ -18,8 +18,8 @@ It can clone/pull repositories, install from releases or source, create global s
 - Content-addressed store (`store/sha256/<hash>/<binary>`)
 - Remote binary cache support (`binaryCache` config + `mntpack prebuild`)
 - Conflict handling for package names (interactive prompt when needed)
-- Managed local NuGet feed under `<MNTPACK_HOME>/nuget/source`
-- `mntpack nuget ...` commands for project-local NuGet workflows
+- Managed local NuGet feed and source-package state under `<MNTPACK_HOME>/nuget/{feed,state}`
+- `mntpack nuget ...` commands for source-backed and consumer-side NuGet workflows
 - Driver-based installation architecture:
   - Rust
   - Python
@@ -54,7 +54,8 @@ By default `mntpack` uses:
     exec/
     binary-cache/
   nuget/
-    source/
+    feed/
+    state/
   bin/
 ```
 
@@ -126,13 +127,21 @@ mntpack config show
 mntpack config get <key>
 mntpack config set <key> <value>
 mntpack config reset
-mntpack nuget add <package> [version] [--source <source>] [--path <dir>] [--project <file>] [--build]
-mntpack nuget remove <package> [--path <dir>] [--project <file>] [--build]
-mntpack nuget list [--path <dir>]
-mntpack nuget install [--path <dir>] [--project <file>] [--build]
+mntpack nuget init [--path <dir>] [--project <file>]
+mntpack nuget use <package> [version] [--path <dir>] [--project <file>] [--build]
+mntpack nuget add <package> [version] [--source <source>] [--path <dir>] [--project <file>] [--no-restore] [--build]
+mntpack nuget remove <package> [--path <dir>] [--project <file>] [--no-restore] [--build]
+mntpack nuget list [--path <dir>] [--project <file>]
 mntpack nuget apply [--path <dir>] [--project <file>] [--build]
 mntpack nuget restore [--path <dir>] [--project <file>] [--build]
-mntpack nuget ensure [--path <dir>] [--project <file>]
+mntpack nuget feed path
+mntpack nuget feed list
+mntpack nuget source add <name> --repo <owner/repo|url> [--project <file.csproj>] [--package-id <id>] [--version <ver>] [--path <dir>]
+mntpack nuget source list [--path <dir>]
+mntpack nuget source build <name> [--path <dir>] [--force]
+mntpack nuget source build-all [--path <dir>] [--force]
+mntpack nuget source update <name> [--path <dir>]
+mntpack nuget source sync [--path <dir>] [--force]
 ```
 
 Examples:
@@ -232,18 +241,56 @@ Supported fields include:
 - `preinstall`
 - `postinstall`
 - `dependencies`
-- `nuget` (string entries like `"Newtonsoft.Json@13.0.3"` or objects with `id`, `version`, `source`)
+- `nugetSources` (source-backed C# / NuGet package recipes)
+- `nuget` (consumer package declarations)
 - `build`
 - `run` (string command or target map)
 - `bin` (legacy binary path or command map like `{ "tool": "php tool.php" }`)
 - `release` (platform asset mapping)
 
-NuGet helpers:
+Source-backed NuGet example:
 
-- `mntpack nuget ensure` creates or updates a project-local `NuGet.config` with the managed `mntpack-local` source.
-- `mntpack nuget add/remove` keeps `mntpack.json` and the selected `.csproj` in sync.
-- `mntpack nuget install` / `apply` reads package declarations from `mntpack.json`, applies them to a `.NET` project, then restores.
-- Multi-project repositories should pass `--project <path-to.csproj>` when more than one `.csproj` exists.
+```json
+{
+  "nugetSources": {
+    "CS2Luau.Roblox": {
+      "type": "github",
+      "repo": "MINTILER-DEV/CS2Luau",
+      "project": "src/CS2Luau.Roblox/CS2Luau.Roblox.csproj",
+      "packageId": "CS2Luau.Roblox",
+      "version": "1.0.0-local.1",
+      "outputMode": "feed"
+    }
+  }
+}
+```
+
+Consumer package example:
+
+```json
+{
+  "nuget": {
+    "packages": [
+      {
+        "name": "CS2Luau.Roblox",
+        "version": "1.0.0-local.1",
+        "source": "mntpack-local"
+      }
+    ]
+  }
+}
+```
+
+Typical workflow:
+
+```bash
+mntpack nuget source add CS2Luau.Roblox --repo MINTILER-DEV/CS2Luau --project src/CS2Luau.Roblox/CS2Luau.Roblox.csproj --package-id CS2Luau.Roblox --version 1.0.0-local.1
+mntpack nuget source build CS2Luau.Roblox
+mntpack nuget init
+mntpack nuget use CS2Luau.Roblox 1.0.0-local.1
+```
+
+`nuget use` is the smooth path: it ensures the local feed exists, builds a registered source package if it is missing, writes `NuGet.config`, adds the package to the selected project, and restores it.
 
 ## Development
 

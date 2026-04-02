@@ -50,13 +50,21 @@ mntpack search <query...>
 mntpack prebuild
 mntpack why <package>
 mntpack doctor [--fix]
-mntpack nuget add <package> [version] [--source <source>] [--path <dir>] [--project <file>] [--build]
-mntpack nuget remove <package> [--path <dir>] [--project <file>] [--build]
-mntpack nuget list [--path <dir>]
-mntpack nuget install [--path <dir>] [--project <file>] [--build]
+mntpack nuget init [--path <dir>] [--project <file>]
+mntpack nuget use <package> [version] [--path <dir>] [--project <file>] [--build]
+mntpack nuget add <package> [version] [--source <source>] [--path <dir>] [--project <file>] [--no-restore] [--build]
+mntpack nuget remove <package> [--path <dir>] [--project <file>] [--no-restore] [--build]
+mntpack nuget list [--path <dir>] [--project <file>]
 mntpack nuget apply [--path <dir>] [--project <file>] [--build]
 mntpack nuget restore [--path <dir>] [--project <file>] [--build]
-mntpack nuget ensure [--path <dir>] [--project <file>]
+mntpack nuget feed path
+mntpack nuget feed list
+mntpack nuget source add <name> --repo <owner/repo|url> [--project <file.csproj>] [--package-id <id>] [--version <ver>] [--path <dir>]
+mntpack nuget source list [--path <dir>]
+mntpack nuget source build <name> [--path <dir>] [--force]
+mntpack nuget source build-all [--path <dir>] [--force]
+mntpack nuget source update <name> [--path <dir>]
+mntpack nuget source sync [--path <dir>] [--force]
 ```
 
 ## 3. Repository Input Formats
@@ -320,7 +328,8 @@ Detected `.NET` repositories now:
 
 - ensure a project-local `NuGet.config` contains the managed `mntpack-local` source,
 - apply `mntpack.json` `nuget` declarations before build when present,
-- prefer `dotnet build <solution>` and otherwise build the detected `.csproj` in Release mode.
+- prefer `dotnet build <solution>` and otherwise build the detected `.csproj` in Release mode,
+- support source-backed package recipes that clone/build/pack C# repositories into the local feed.
 
 ## 13.1 Binary Cache
 
@@ -341,10 +350,36 @@ Common fields:
 - `preinstall` (shell command)
 - `postinstall` (shell command)
 - `dependencies` (other mntpack packages)
+- `nugetSources` (source-backed package recipes)
 - `nuget` (NuGet package declarations)
 - `build` (optional shell command)
 - `run` (command to launch the package)
 - `release` (GitHub release asset map)
+
+### `nugetSources` field
+
+Use `nugetSources` to declare a GitHub C# project that `mntpack` should clone, build, and pack into the local feed.
+
+```json
+{
+  "nugetSources": {
+    "CS2Luau.Roblox": {
+      "type": "github",
+      "repo": "MINTILER-DEV/CS2Luau",
+      "project": "src/CS2Luau.Roblox/CS2Luau.Roblox.csproj",
+      "packageId": "CS2Luau.Roblox",
+      "version": "1.0.0-local.1",
+      "outputMode": "feed"
+    }
+  }
+}
+```
+
+Build it into the local feed with:
+
+```bash
+mntpack nuget source build CS2Luau.Roblox
+```
 
 ### `nuget` field
 
@@ -354,9 +389,11 @@ String form:
 
 ```json
 {
-  "nuget": [
-    "Newtonsoft.Json@13.0.3"
-  ]
+  "nuget": {
+    "packages": [
+      "Newtonsoft.Json@13.0.3"
+    ]
+  }
 }
 ```
 
@@ -364,27 +401,44 @@ Object form:
 
 ```json
 {
-  "nuget": [
-    {
-      "id": "Newtonsoft.Json",
-      "version": "13.0.3"
-    },
-    {
-      "id": "My.Local.Package",
-      "version": "1.0.0",
-      "source": "mntpack-local"
-    }
-  ]
+  "nuget": {
+    "packages": [
+      {
+        "name": "Newtonsoft.Json",
+        "version": "13.0.3"
+      },
+      {
+        "name": "My.Local.Package",
+        "version": "1.0.0",
+        "source": "mntpack-local"
+      }
+    ]
+  }
 }
 ```
 
 Apply those entries to a project with:
 
 ```bash
-mntpack nuget install --project src/MyTool/MyTool.csproj
+mntpack nuget apply --project src/MyTool/MyTool.csproj
 ```
 
-Use `mntpack nuget ensure` to create or update `NuGet.config` with the managed local source only.
+Use `mntpack nuget init` to create or update `NuGet.config` with the managed local source only.
+
+All-in-one local-source install:
+
+```bash
+mntpack nuget use CS2Luau.Roblox 1.0.0-local.1
+```
+
+That command:
+
+- checks the local feed,
+- builds the registered source package first if it is missing,
+- updates `mntpack.json`,
+- writes `NuGet.config`,
+- adds the package reference,
+- restores the target project.
 
 ### `run` field (recommended)
 
@@ -503,7 +557,8 @@ cache/git/
 cache/exec/
 cache/binary-cache/
 nuget/
-nuget/source/
+nuget/feed/
+nuget/state/
 bin/
 ```
 
