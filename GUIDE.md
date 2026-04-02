@@ -50,6 +50,13 @@ mntpack search <query...>
 mntpack prebuild
 mntpack why <package>
 mntpack doctor [--fix]
+mntpack nuget add <package> [version] [--source <source>] [--path <dir>] [--project <file>] [--build]
+mntpack nuget remove <package> [--path <dir>] [--project <file>] [--build]
+mntpack nuget list [--path <dir>]
+mntpack nuget install [--path <dir>] [--project <file>] [--build]
+mntpack nuget apply [--path <dir>] [--project <file>] [--build]
+mntpack nuget restore [--path <dir>] [--project <file>] [--build]
+mntpack nuget ensure [--path <dir>] [--project <file>]
 ```
 
 ## 3. Repository Input Formats
@@ -294,6 +301,7 @@ Important config keys:
 - `paths.node`
 - `paths.npm`
 - `paths.cargo`
+- `paths.dotnet`
 - `paths.cmake`
 - `paths.make`
 
@@ -304,8 +312,15 @@ Important config keys:
 - Rust: `Cargo.toml`
 - Python: `requirements.txt` or `pyproject.toml`
 - Node: `package.json`
+- .NET / C#: `*.csproj`, `*.sln`, `*.slnx`, `Directory.Build.props`, `Directory.Build.targets`, or `global.json`
 - C/C++: `CMakeLists.txt` or `Makefile`/`makefile`
 - Generic: fallback with `mntpack.json` run/bin
+
+Detected `.NET` repositories now:
+
+- ensure a project-local `NuGet.config` contains the managed `mntpack-local` source,
+- apply `mntpack.json` `nuget` declarations before build when present,
+- prefer `dotnet build <solution>` and otherwise build the detected `.csproj` in Release mode.
 
 ## 13.1 Binary Cache
 
@@ -326,9 +341,50 @@ Common fields:
 - `preinstall` (shell command)
 - `postinstall` (shell command)
 - `dependencies` (other mntpack packages)
+- `nuget` (NuGet package declarations)
 - `build` (optional shell command)
 - `run` (command to launch the package)
 - `release` (GitHub release asset map)
+
+### `nuget` field
+
+You can declare NuGet package requirements directly in `mntpack.json`.
+
+String form:
+
+```json
+{
+  "nuget": [
+    "Newtonsoft.Json@13.0.3"
+  ]
+}
+```
+
+Object form:
+
+```json
+{
+  "nuget": [
+    {
+      "id": "Newtonsoft.Json",
+      "version": "13.0.3"
+    },
+    {
+      "id": "My.Local.Package",
+      "version": "1.0.0",
+      "source": "mntpack-local"
+    }
+  ]
+}
+```
+
+Apply those entries to a project with:
+
+```bash
+mntpack nuget install --project src/MyTool/MyTool.csproj
+```
+
+Use `mntpack nuget ensure` to create or update `NuGet.config` with the managed local source only.
 
 ### `run` field (recommended)
 
@@ -446,6 +502,8 @@ cache/
 cache/git/
 cache/exec/
 cache/binary-cache/
+nuget/
+nuget/source/
 bin/
 ```
 

@@ -18,10 +18,13 @@ It can clone/pull repositories, install from releases or source, create global s
 - Content-addressed store (`store/sha256/<hash>/<binary>`)
 - Remote binary cache support (`binaryCache` config + `mntpack prebuild`)
 - Conflict handling for package names (interactive prompt when needed)
+- Managed local NuGet feed under `<MNTPACK_HOME>/nuget/source`
+- `mntpack nuget ...` commands for project-local NuGet workflows
 - Driver-based installation architecture:
   - Rust
   - Python
   - Node
+  - .NET / C#
   - C/C++ (`cmake` / `make`)
   - Generic (`mntpack.json` build command)
 - GitHub release asset download with source-build fallback
@@ -50,6 +53,8 @@ By default `mntpack` uses:
     git/
     exec/
     binary-cache/
+  nuget/
+    source/
   bin/
 ```
 
@@ -81,7 +86,7 @@ The installer embeds `mntpack` during its build, so the resulting installer bina
 Installer behavior:
 
 - Prompts for install base directory (default: home directory)
-- Creates `<base>/.mntpack/{repos,packages,cache,bin}`
+- Creates `<base>/.mntpack/{repos,packages,store,cache,nuget,bin}`
 - Installs `mntpack` as managed package `packages/mntpack`
 - Places payload in hash-backed store entries under `store/sha256/<hash>/...`
 - Creates `mntpack` shim in `.mntpack/bin`
@@ -121,6 +126,13 @@ mntpack config show
 mntpack config get <key>
 mntpack config set <key> <value>
 mntpack config reset
+mntpack nuget add <package> [version] [--source <source>] [--path <dir>] [--project <file>] [--build]
+mntpack nuget remove <package> [--path <dir>] [--project <file>] [--build]
+mntpack nuget list [--path <dir>]
+mntpack nuget install [--path <dir>] [--project <file>] [--build]
+mntpack nuget apply [--path <dir>] [--project <file>] [--build]
+mntpack nuget restore [--path <dir>] [--project <file>] [--build]
+mntpack nuget ensure [--path <dir>] [--project <file>]
 ```
 
 Examples:
@@ -220,10 +232,18 @@ Supported fields include:
 - `preinstall`
 - `postinstall`
 - `dependencies`
+- `nuget` (string entries like `"Newtonsoft.Json@13.0.3"` or objects with `id`, `version`, `source`)
 - `build`
 - `run` (string command or target map)
 - `bin` (legacy binary path or command map like `{ "tool": "php tool.php" }`)
 - `release` (platform asset mapping)
+
+NuGet helpers:
+
+- `mntpack nuget ensure` creates or updates a project-local `NuGet.config` with the managed `mntpack-local` source.
+- `mntpack nuget add/remove` keeps `mntpack.json` and the selected `.csproj` in sync.
+- `mntpack nuget install` / `apply` reads package declarations from `mntpack.json`, applies them to a `.NET` project, then restores.
+- Multi-project repositories should pass `--project <path-to.csproj>` when more than one `.csproj` exists.
 
 ## Development
 
