@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 
 use super::{
     cpp::CppDriver,
+    dotnet::DotnetDriver,
     driver::{DriverRuntime, InstallContext, InstallDriver, InstallResult, auto_discover_binary},
     generic::GenericDriver,
     node::NodeDriver,
@@ -23,6 +24,7 @@ impl InstallerManager {
                 Box::new(PythonDriver),
                 Box::new(NodeDriver),
                 Box::new(CppDriver),
+                Box::new(DotnetDriver),
                 Box::new(GenericDriver),
             ],
         }

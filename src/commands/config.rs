@@ -38,6 +38,7 @@ fn get_value(config: &Config, key: &str) -> Result<String> {
         "pathsnode" => Ok(config.paths.node.clone()),
         "pathsnpm" => Ok(config.paths.npm.clone()),
         "pathscargo" => Ok(config.paths.cargo.clone()),
+        "pathsdotnet" => Ok(config.paths.dotnet.clone()),
         "pathscmake" => Ok(config.paths.cmake.clone()),
         "pathsmake" => Ok(config.paths.make.clone()),
         "autoupdateonrun" => Ok(config.auto_update_on_run.to_string()),
@@ -60,6 +61,7 @@ fn set_value(config: &mut Config, key: &str, value: &str) -> Result<()> {
         "pathsnode" => config.paths.node = value.to_string(),
         "pathsnpm" => config.paths.npm = value.to_string(),
         "pathscargo" => config.paths.cargo = value.to_string(),
+        "pathsdotnet" => config.paths.dotnet = value.to_string(),
         "pathscmake" => config.paths.cmake = value.to_string(),
         "pathsmake" => config.paths.make = value.to_string(),
         "autoupdateonrun" => {

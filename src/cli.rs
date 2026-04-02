@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -92,6 +94,10 @@ pub enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    Nuget {
+        #[command(subcommand)]
+        action: NugetAction,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -100,4 +106,63 @@ pub enum ConfigAction {
     Get { key: String },
     Set { key: String, value: String },
     Reset,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NugetAction {
+    Add {
+        package: String,
+        version: Option<String>,
+        #[arg(long = "source")]
+        source: Option<String>,
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+        #[arg(long = "build")]
+        build: bool,
+    },
+    Remove {
+        package: String,
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+        #[arg(long = "build")]
+        build: bool,
+    },
+    List {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+    },
+    Install {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+        #[arg(long = "build")]
+        build: bool,
+    },
+    Apply {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+        #[arg(long = "build")]
+        build: bool,
+    },
+    Restore {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+        #[arg(long = "build")]
+        build: bool,
+    },
+    Ensure {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+    },
 }

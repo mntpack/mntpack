@@ -17,6 +17,8 @@ pub async fn execute(runtime: &RuntimeContext, fix: bool) -> Result<()> {
     println!("bin\t{}", runtime.paths.bin.display());
     println!("store\t{}", runtime.paths.store.display());
     println!("cache\t{}", runtime.paths.cache.display());
+    println!("nuget\t{}", runtime.paths.nuget.display());
+    println!("nuget-source\t{}", runtime.paths.nuget_source.display());
 
     let checks = [
         ("git", runtime.config.paths.git.as_str()),
@@ -25,6 +27,7 @@ pub async fn execute(runtime: &RuntimeContext, fix: bool) -> Result<()> {
         ("cargo", runtime.config.paths.cargo.as_str()),
         ("node", runtime.config.paths.node.as_str()),
         ("npm", runtime.config.paths.npm.as_str()),
+        ("dotnet", runtime.config.paths.dotnet.as_str()),
         ("cmake", runtime.config.paths.cmake.as_str()),
         ("make", runtime.config.paths.make.as_str()),
     ];

@@ -17,6 +17,7 @@ pub struct ToolPaths {
     pub node: String,
     pub npm: String,
     pub cargo: String,
+    pub dotnet: String,
     pub cmake: String,
     pub make: String,
 }
@@ -30,6 +31,7 @@ impl Default for ToolPaths {
             node: "node".to_string(),
             npm: "npm".to_string(),
             cargo: "cargo".to_string(),
+            dotnet: "dotnet".to_string(),
             cmake: "cmake".to_string(),
             make: "make".to_string(),
         }
@@ -114,6 +116,8 @@ pub struct AppPaths {
     pub cache: PathBuf,
     pub cache_git: PathBuf,
     pub cache_exec: PathBuf,
+    pub nuget: PathBuf,
+    pub nuget_source: PathBuf,
     pub store: PathBuf,
     pub bin: PathBuf,
 }
@@ -142,6 +146,10 @@ impl AppPaths {
         }
         preferred
     }
+
+    pub fn nuget_source_value(&self) -> String {
+        normalize_path_for_os(&self.nuget_source)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +167,8 @@ impl RuntimeContext {
         let cache = root.join("cache");
         let cache_git = cache.join("git");
         let cache_exec = cache.join("exec");
+        let nuget = root.join("nuget");
+        let nuget_source = nuget.join("source");
         let store = root.join("store");
         let bin = root.join("bin");
 
@@ -169,6 +179,8 @@ impl RuntimeContext {
             &cache,
             &cache_git,
             &cache_exec,
+            &nuget,
+            &nuget_source,
             &store,
             &bin,
         ] {
@@ -199,6 +211,8 @@ impl RuntimeContext {
                 cache,
                 cache_git,
                 cache_exec,
+                nuget,
+                nuget_source,
                 store,
                 bin,
             },
@@ -238,5 +252,14 @@ pub fn normalize_repo_url(url: &str) -> String {
         url.to_string()
     } else {
         format!("{url}.git")
+    }
+}
+
+pub fn normalize_path_for_os(path: &std::path::Path) -> String {
+    let rendered = path.to_string_lossy().to_string();
+    if cfg!(windows) {
+        rendered.replace('/', "\\")
+    } else {
+        rendered.replace('\\', "/")
     }
 }

@@ -6,6 +6,7 @@ use walkdir::WalkDir;
 
 use crate::{
     config::RuntimeContext,
+    dotnet,
     github::clone::sync_repo,
     package::{manifest::Manifest, resolver::resolve_repo},
 };
@@ -73,6 +74,9 @@ fn detect_project_type(repo_dir: &Path) -> &'static str {
     if repo_dir.join("package.json").exists() {
         return "Node";
     }
+    if dotnet::is_dotnet_project(repo_dir) {
+        return ".NET";
+    }
     if repo_dir.join("CMakeLists.txt").exists() {
         return "C++ (CMake)";
     }
@@ -94,6 +98,9 @@ fn build_hint(repo_dir: &Path, manifest: &Option<Manifest>, runtime: &RuntimeCon
     }
     if repo_dir.join("package.json").exists() {
         return format!("{} install", runtime.config.paths.npm);
+    }
+    if let Ok(Some(build)) = dotnet::build_hint(repo_dir, &runtime.config.paths.dotnet) {
+        return build;
     }
     if repo_dir.join("CMakeLists.txt").exists() {
         return format!(

@@ -5,6 +5,7 @@ pub mod exec;
 pub mod info;
 pub mod inspect;
 pub mod list;
+pub mod nuget;
 pub mod outdated;
 pub mod prebuild;
 pub mod reinstall;

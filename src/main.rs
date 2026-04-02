@@ -2,6 +2,7 @@ mod binary_cache;
 mod cli;
 mod commands;
 mod config;
+mod dotnet;
 mod github;
 mod installer;
 mod package;
@@ -79,6 +80,7 @@ async fn main() -> Result<()> {
         Commands::Why { package } => commands::why::execute(&runtime, &package)?,
         Commands::Doctor { fix } => commands::doctor::execute(&runtime, fix).await?,
         Commands::Config { action } => commands::config::execute(&runtime, action)?,
+        Commands::Nuget { action } => commands::nuget::execute(&runtime, action)?,
     }
 
     Ok(())
