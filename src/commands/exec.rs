@@ -12,7 +12,7 @@ use crate::{
     config::RuntimeContext,
     github::{clone::sync_repo, release::try_download_release_binary},
     installer::{
-        driver::{DriverRuntime, InstallContext, run_shell_command},
+        driver::{DriverRuntime, InstallContext, run_command_with_args},
         manager::{InstallerManager, materialize_binary},
     },
     package::{
@@ -22,6 +22,7 @@ use crate::{
 };
 
 pub async fn execute(runtime: &RuntimeContext, repo_input: &str, args: &[String]) -> Result<()> {
+    let invocation_cwd = std::env::current_dir().context("failed to resolve current directory")?;
     if let Some((package, version)) = parse_versioned_package(repo_input) {
         return execute_stored_version(runtime, &package, &version, args);
     }
@@ -92,8 +93,7 @@ pub async fn execute(runtime: &RuntimeContext, repo_input: &str, args: &[String]
     }
 
     if let Some(command) = run_command {
-        let full_command = append_args(&command, args);
-        run_shell_command(&full_command, &repo_dir)?;
+        run_command_with_args(&command, args, &repo_dir, &invocation_cwd)?;
         return Ok(());
     }
 
@@ -135,22 +135,6 @@ fn unique_suffix() -> String {
         .unwrap_or_default()
         .as_millis();
     millis.to_string()
-}
-
-fn append_args(base_command: &str, args: &[String]) -> String {
-    if args.is_empty() {
-        return base_command.to_string();
-    }
-    let escaped: Vec<String> = args.iter().map(|arg| shell_escape(arg)).collect();
-    format!("{base_command} {}", escaped.join(" "))
-}
-
-fn shell_escape(input: &str) -> String {
-    if cfg!(windows) {
-        format!("\"{}\"", input.replace('"', "\\\""))
-    } else {
-        format!("'{}'", input.replace('\'', "'\"'\"'"))
-    }
 }
 
 fn parse_versioned_package(input: &str) -> Option<(String, String)> {

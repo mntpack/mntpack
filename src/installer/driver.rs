@@ -72,6 +72,44 @@ pub fn run_shell_command(command: &str, cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn run_command_with_args(
+    command: &str,
+    args: &[String],
+    command_root: &Path,
+    invocation_cwd: &Path,
+) -> Result<()> {
+    if let Some((program, base_args)) = parse_simple_command(command) {
+        let base_args = absolutize_existing_relative_args(&base_args, command_root);
+        let status = Command::new(&program)
+            .args(&base_args)
+            .args(args)
+            .current_dir(invocation_cwd)
+            .status()
+            .with_context(|| {
+                format!(
+                    "failed to run '{}' in {}",
+                    command,
+                    invocation_cwd.display()
+                )
+            })?;
+        if !status.success() {
+            bail!(
+                "script '{}' failed with exit code {:?}",
+                command,
+                status.code()
+            );
+        }
+        return Ok(());
+    }
+
+    if args.is_empty() {
+        return run_shell_command(command, command_root);
+    }
+
+    let command = append_args(command, args);
+    run_shell_command(&command, command_root)
+}
+
 pub fn manifest_bin(ctx: &InstallContext) -> Result<PathBuf> {
     let Some(manifest) = &ctx.manifest else {
         bail!("mntpack.json is required to determine install binary");
@@ -96,6 +134,101 @@ fn format_command(program: &str, args: &[&str]) -> String {
         return program.to_string();
     }
     format!("{program} {}", args.join(" "))
+}
+
+fn parse_simple_command(command: &str) -> Option<(String, Vec<String>)> {
+    if contains_shell_metacharacters(command) {
+        return None;
+    }
+
+    let tokens = tokenize_command(command)?;
+    let (program, args) = tokens.split_first()?;
+    Some((program.clone(), args.to_vec()))
+}
+
+fn contains_shell_metacharacters(command: &str) -> bool {
+    command
+        .chars()
+        .any(|ch| matches!(ch, '|' | '&' | ';' | '<' | '>' | '(' | ')'))
+}
+
+fn tokenize_command(command: &str) -> Option<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+
+    for ch in command.chars() {
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => quote = Some(ch),
+            ' ' | '\t' | '\r' | '\n' => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    Some(tokens)
+}
+
+fn append_args(base_command: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        return base_command.to_string();
+    }
+    let escaped: Vec<String> = args.iter().map(|arg| shell_escape(arg)).collect();
+    format!("{base_command} {}", escaped.join(" "))
+}
+
+fn absolutize_existing_relative_args(args: &[String], command_root: &Path) -> Vec<String> {
+    args.iter()
+        .map(|arg| {
+            if arg.starts_with('-') {
+                return arg.clone();
+            }
+
+            let candidate = Path::new(arg);
+            if candidate.is_absolute() {
+                return arg.clone();
+            }
+
+            let repo_relative = command_root.join(candidate);
+            if repo_relative.exists() {
+                return repo_relative.to_string_lossy().to_string();
+            }
+
+            arg.clone()
+        })
+        .collect()
+}
+
+fn shell_escape(input: &str) -> String {
+    if cfg!(windows) {
+        if input.chars().all(|ch| {
+            ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '\\' | ':')
+        }) {
+            input.to_string()
+        } else {
+            format!("\"{}\"", input.replace('"', "\\\""))
+        }
+    } else {
+        format!("'{}'", input.replace('\'', "'\"'\"'"))
+    }
 }
 
 pub fn auto_discover_binary(repo_path: &Path, package_name: &str) -> Result<Option<PathBuf>> {
@@ -163,4 +296,61 @@ fn is_executable_candidate(path: &Path) -> Result<bool> {
 
     #[allow(unreachable_code)]
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::Path};
+
+    use tempfile::tempdir;
+
+    use super::{
+        absolutize_existing_relative_args, contains_shell_metacharacters, parse_simple_command,
+    };
+
+    #[test]
+    fn parses_simple_dotnet_run_command() {
+        let parsed = parse_simple_command("dotnet run --project .\\src\\Tool --")
+            .expect("expected command to parse");
+        assert_eq!(parsed.0, "dotnet");
+        assert_eq!(
+            parsed.1,
+            vec![
+                "run".to_string(),
+                "--project".to_string(),
+                ".\\src\\Tool".to_string(),
+                "--".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_shell_style_commands_for_direct_execution() {
+        assert!(contains_shell_metacharacters(
+            "dotnet restore && dotnet build"
+        ));
+        assert!(parse_simple_command("dotnet restore && dotnet build").is_none());
+    }
+
+    #[test]
+    fn absolutizes_existing_repo_relative_args() {
+        let temp = tempdir().expect("tempdir");
+        let project_dir = temp.path().join("src").join("Tool");
+        fs::create_dir_all(&project_dir).expect("project dir");
+        let project_path = project_dir.join("Tool.csproj");
+        fs::write(&project_path, "").expect("project file");
+
+        let args = vec![
+            "run".to_string(),
+            "--project".to_string(),
+            ".\\src\\Tool\\Tool.csproj".to_string(),
+            "--".to_string(),
+        ];
+        let resolved = absolutize_existing_relative_args(&args, temp.path());
+
+        assert_eq!(resolved[0], "run");
+        assert_eq!(resolved[1], "--project");
+        assert_eq!(Path::new(&resolved[2]), project_path.as_path());
+        assert_eq!(resolved[3], "--");
+    }
 }

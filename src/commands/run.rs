@@ -3,7 +3,7 @@ use std::{collections::HashSet, path::PathBuf, process::Command};
 use anyhow::{Context, Result, bail};
 
 use crate::{
-    config::RuntimeContext, installer::driver::run_shell_command, package::record::load_record,
+    config::RuntimeContext, installer::driver::run_command_with_args, package::record::load_record,
 };
 
 pub async fn execute(runtime: &RuntimeContext, package_name: &str, args: &[String]) -> Result<()> {
@@ -70,6 +70,7 @@ fn execute_run_command(
     base_command: &str,
     args: &[String],
 ) -> Result<()> {
+    let invocation_cwd = std::env::current_dir().context("failed to resolve current directory")?;
     let repo_dir = runtime
         .paths
         .repo_dir_existing_or_new(&record.owner, &record.repo);
@@ -95,24 +96,7 @@ fn execute_run_command(
         return Ok(());
     }
 
-    let command = append_args(base_command, args);
-    run_shell_command(&command, &repo_dir)
-}
-
-fn append_args(base_command: &str, args: &[String]) -> String {
-    if args.is_empty() {
-        return base_command.to_string();
-    }
-    let escaped: Vec<String> = args.iter().map(|arg| shell_escape(arg)).collect();
-    format!("{base_command} {}", escaped.join(" "))
-}
-
-fn shell_escape(input: &str) -> String {
-    if cfg!(windows) {
-        format!("\"{}\"", input.replace('"', "\\\""))
-    } else {
-        format!("'{}'", input.replace('\'', "'\"'\"'"))
-    }
+    run_command_with_args(base_command, args, &repo_dir, &invocation_cwd)
 }
 
 fn resolve_repo_local_executable(repo_dir: &std::path::Path, command: &str) -> Option<PathBuf> {
