@@ -199,6 +199,16 @@ pub enum NugetAction {
         #[arg(long = "build")]
         build: bool,
     },
+    Refresh {
+        #[arg(long = "path")]
+        path: Option<PathBuf>,
+        #[arg(long = "project")]
+        project: Option<PathBuf>,
+        #[arg(long = "force")]
+        force: bool,
+        #[arg(long = "build")]
+        build: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -356,6 +366,22 @@ mod tests {
             } => {
                 assert_eq!(package, "CS2Luau.Compiler");
                 assert_eq!(version.as_deref(), Some("1.0.0-local.2"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_nuget_refresh_command() {
+        let cli = Cli::try_parse_from(["mntpack", "nuget", "refresh", "--force", "--build"])
+            .expect("parse cli");
+
+        match cli.command {
+            Commands::Nuget {
+                action: NugetAction::Refresh { force, build, .. },
+            } => {
+                assert!(force);
+                assert!(build);
             }
             other => panic!("unexpected command: {other:?}"),
         }

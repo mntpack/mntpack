@@ -90,6 +90,12 @@ pub fn execute(runtime: &RuntimeContext, action: NugetAction) -> Result<()> {
             refresh,
             build,
         } => restore_project(runtime, path.as_deref(), project.as_deref(), refresh, build),
+        NugetAction::Refresh {
+            path,
+            project,
+            force,
+            build,
+        } => refresh_workspace(runtime, path.as_deref(), project.as_deref(), force, build),
     }
 }
 
@@ -450,6 +456,72 @@ fn restore_project(
 
     println!("config: {}", config.path.display());
     println!("restored .NET dependencies in {}", root.display());
+    Ok(())
+}
+
+fn refresh_workspace(
+    runtime: &RuntimeContext,
+    path: Option<&Path>,
+    project: Option<&Path>,
+    force: bool,
+    build: bool,
+) -> Result<()> {
+    let manifest_root = resolve_manifest_root(path)?;
+    let manifest = require_manifest(&manifest_root)?;
+    let packages = manifest.resolved_nuget_packages();
+    let local_packages: Vec<_> = packages
+        .iter()
+        .filter(|package| {
+            package
+                .source
+                .as_deref()
+                .map(|value| value.eq_ignore_ascii_case(nuget::MNTPACK_LOCAL_SOURCE_KEY))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+
+    let mut rebuilt_sources = Vec::new();
+    if !manifest.nuget_source_definitions().is_empty() {
+        rebuilt_sources = nuget::sync_all_sources(runtime, &manifest_root, force)?;
+    }
+
+    let root = resolve_consumer_root(path, project)?;
+    if dotnet::is_dotnet_project(&root) {
+        let config = dotnet::ensure_workspace_config(runtime, &root, project)?;
+        refresh_packages_cache(&local_packages)?;
+        dotnet::restore(runtime, &root, project)?;
+        if build {
+            dotnet::build(runtime, &root)?;
+        }
+        println!("config: {}", config.path.display());
+    }
+
+    if rebuilt_sources.is_empty() && local_packages.is_empty() {
+        println!(
+            "no source-backed or mntpack-local NuGet packages were found in {}",
+            manifest_path(&manifest_root).display()
+        );
+        return Ok(());
+    }
+
+    println!("manifest: {}", manifest_path(&manifest_root).display());
+    if !rebuilt_sources.is_empty() {
+        for result in rebuilt_sources {
+            println!(
+                "rebuilt {} {} -> {}",
+                result.package.package_id,
+                result.package.version,
+                result.package.path.display()
+            );
+        }
+    }
+    if !local_packages.is_empty() {
+        println!(
+            "refreshed {} local package reference(s)",
+            local_packages.len()
+        );
+    }
     Ok(())
 }
 
