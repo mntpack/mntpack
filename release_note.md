@@ -1,5 +1,5 @@
-# mntpack 0.6.11 (2026-04-02)
+# mntpack 0.6.12 (2026-04-03)
 
 ## Fixed
-- Windows argument forwarding for command-driven packages no longer injects literal quotes into forwarded args like `build` and `--project`.
-- Simple manifest `run`/`bin` commands are now executed directly when possible, so tools like `cs2luau` receive the expected argv on launch.
+- Added `mntpack nuget cache clear <package> [version]` plus `--refresh` support on `mntpack nuget add/use/apply/restore` for clearing stale global NuGet cache entries when local feed packages are rebuilt with the same version.
+- This makes same-version local feed updates usable without manually deleting entries under `%USERPROFILE%\\.nuget\\packages`.

@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    env, fs,
     io::Read,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -71,6 +71,44 @@ pub fn ensure_feed(runtime: &RuntimeContext) -> Result<PathBuf> {
         )
     })?;
     Ok(runtime.paths.nuget_feed.clone())
+}
+
+pub fn clear_global_package_cache(package_id: &str, version: Option<&str>) -> Result<Vec<PathBuf>> {
+    let root = global_packages_root()?;
+    clear_global_package_cache_under(&root, package_id, version)
+}
+
+fn clear_global_package_cache_under(
+    root: &Path,
+    package_id: &str,
+    version: Option<&str>,
+) -> Result<Vec<PathBuf>> {
+    let package_id = package_id.trim();
+    if package_id.is_empty() {
+        bail!("package id cannot be empty");
+    }
+
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut removed = Vec::new();
+    let package_dirs = matching_children(&root, package_id)?;
+    for package_dir in package_dirs {
+        if let Some(version) = version.map(str::trim).filter(|value| !value.is_empty()) {
+            for version_dir in matching_children(&package_dir, version)? {
+                remove_package_cache_path(&version_dir)?;
+                removed.push(version_dir);
+            }
+            continue;
+        }
+
+        remove_package_cache_path(&package_dir)?;
+        removed.push(package_dir);
+    }
+
+    removed.sort();
+    Ok(removed)
 }
 
 pub fn list_feed_packages(runtime: &RuntimeContext) -> Result<Vec<FeedPackageInfo>> {
@@ -447,9 +485,44 @@ fn current_unix_time() -> u64 {
         .as_secs()
 }
 
+fn global_packages_root() -> Result<PathBuf> {
+    if let Ok(custom) = env::var("NUGET_PACKAGES") {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+
+    let home = dirs::home_dir().context("unable to locate user home directory")?;
+    Ok(home.join(".nuget").join("packages"))
+}
+
+fn matching_children(root: &Path, expected: &str) -> Result<Vec<PathBuf>> {
+    let mut matches = Vec::new();
+    for entry in fs::read_dir(root).with_context(|| format!("failed to read {}", root.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case(expected) {
+            matches.push(path);
+        }
+    }
+    Ok(matches)
+}
+
+fn remove_package_cache_path(path: &Path) -> Result<()> {
+    fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::fs;
     use std::io::Write;
 
     use tempfile::tempdir;
@@ -457,7 +530,10 @@ mod tests {
 
     use crate::package::manifest::{Manifest, NugetSourceDefinition};
 
-    use super::{find_source_for_package, read_nupkg_metadata, source_state_path};
+    use super::{
+        clear_global_package_cache_under, find_source_for_package, read_nupkg_metadata,
+        source_state_path,
+    };
 
     #[test]
     fn finds_source_definition_by_package_id() {
@@ -533,5 +609,23 @@ mod tests {
 
         let path = source_state_path(&runtime, "CS2Luau.Roblox");
         assert!(path.ends_with("CS2Luau.Roblox.json"));
+    }
+
+    #[test]
+    fn clears_matching_global_package_cache_entries() {
+        let temp = tempdir().expect("tempdir");
+        let package_root = temp.path().join("nuget-cache");
+        let version_dir = package_root.join("cs2luau.compiler").join("1.0.0-local.2");
+        fs::create_dir_all(&version_dir).expect("version dir");
+
+        let removed = clear_global_package_cache_under(
+            &package_root,
+            "CS2Luau.Compiler",
+            Some("1.0.0-local.2"),
+        )
+        .expect("clear cache");
+
+        assert_eq!(removed, vec![version_dir.clone()]);
+        assert!(!version_dir.exists());
     }
 }

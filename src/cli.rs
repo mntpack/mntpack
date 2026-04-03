@@ -121,6 +121,10 @@ pub enum NugetAction {
         #[command(subcommand)]
         action: NugetFeedAction,
     },
+    Cache {
+        #[command(subcommand)]
+        action: NugetCacheAction,
+    },
     Source {
         #[command(subcommand)]
         action: NugetSourceAction,
@@ -136,6 +140,8 @@ pub enum NugetAction {
         project: Option<PathBuf>,
         #[arg(long = "no-restore")]
         no_restore: bool,
+        #[arg(long = "refresh")]
+        refresh: bool,
         #[arg(long = "build")]
         build: bool,
     },
@@ -150,6 +156,8 @@ pub enum NugetAction {
         project: Option<PathBuf>,
         #[arg(long = "no-restore")]
         no_restore: bool,
+        #[arg(long = "refresh")]
+        refresh: bool,
         #[arg(long = "build")]
         build: bool,
     },
@@ -176,6 +184,8 @@ pub enum NugetAction {
         path: Option<PathBuf>,
         #[arg(long = "project")]
         project: Option<PathBuf>,
+        #[arg(long = "refresh")]
+        refresh: bool,
         #[arg(long = "build")]
         build: bool,
     },
@@ -184,6 +194,8 @@ pub enum NugetAction {
         path: Option<PathBuf>,
         #[arg(long = "project")]
         project: Option<PathBuf>,
+        #[arg(long = "refresh")]
+        refresh: bool,
         #[arg(long = "build")]
         build: bool,
     },
@@ -193,6 +205,14 @@ pub enum NugetAction {
 pub enum NugetFeedAction {
     Path,
     List,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NugetCacheAction {
+    Clear {
+        package: String,
+        version: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -254,7 +274,7 @@ pub enum NugetSourceAction {
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, Commands, NugetAction, NugetFeedAction, NugetSourceAction};
+    use super::{Cli, Commands, NugetAction, NugetCacheAction, NugetFeedAction, NugetSourceAction};
 
     #[test]
     fn parses_nuget_source_add_command() {
@@ -311,6 +331,32 @@ mod tests {
             Commands::Nuget {
                 action: NugetAction::Use { package, .. },
             } => assert_eq!(package, "CS2Luau.Roblox"),
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_nuget_cache_clear_command() {
+        let cli = Cli::try_parse_from([
+            "mntpack",
+            "nuget",
+            "cache",
+            "clear",
+            "CS2Luau.Compiler",
+            "1.0.0-local.2",
+        ])
+        .expect("parse cli");
+
+        match cli.command {
+            Commands::Nuget {
+                action:
+                    NugetAction::Cache {
+                        action: NugetCacheAction::Clear { package, version },
+                    },
+            } => {
+                assert_eq!(package, "CS2Luau.Compiler");
+                assert_eq!(version.as_deref(), Some("1.0.0-local.2"));
+            }
             other => panic!("unexpected command: {other:?}"),
         }
     }

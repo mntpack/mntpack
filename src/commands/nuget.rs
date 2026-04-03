@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 
 use crate::{
-    cli::{NugetAction, NugetFeedAction, NugetSourceAction},
+    cli::{NugetAction, NugetCacheAction, NugetFeedAction, NugetSourceAction},
     config::RuntimeContext,
     dotnet, nuget,
     package::manifest::{
@@ -21,6 +21,7 @@ pub fn execute(runtime: &RuntimeContext, action: NugetAction) -> Result<()> {
             init_consumer(runtime, path.as_deref(), project.as_deref())
         }
         NugetAction::Feed { action } => execute_feed(runtime, action),
+        NugetAction::Cache { action } => execute_cache(action),
         NugetAction::Source { action } => execute_source(runtime, action),
         NugetAction::Add {
             package,
@@ -29,6 +30,7 @@ pub fn execute(runtime: &RuntimeContext, action: NugetAction) -> Result<()> {
             path,
             project,
             no_restore,
+            refresh,
             build,
         } => add_package(
             runtime,
@@ -38,6 +40,7 @@ pub fn execute(runtime: &RuntimeContext, action: NugetAction) -> Result<()> {
             path.as_deref(),
             project.as_deref(),
             no_restore,
+            refresh,
             build,
         ),
         NugetAction::Use {
@@ -47,6 +50,7 @@ pub fn execute(runtime: &RuntimeContext, action: NugetAction) -> Result<()> {
             path,
             project,
             no_restore,
+            refresh,
             build,
         } => add_package(
             runtime,
@@ -56,6 +60,7 @@ pub fn execute(runtime: &RuntimeContext, action: NugetAction) -> Result<()> {
             path.as_deref(),
             project.as_deref(),
             no_restore,
+            refresh,
             build,
         ),
         NugetAction::Remove {
@@ -76,13 +81,15 @@ pub fn execute(runtime: &RuntimeContext, action: NugetAction) -> Result<()> {
         NugetAction::Apply {
             path,
             project,
+            refresh,
             build,
-        } => install_from_manifest(runtime, path.as_deref(), project.as_deref(), build),
+        } => install_from_manifest(runtime, path.as_deref(), project.as_deref(), refresh, build),
         NugetAction::Restore {
             path,
             project,
+            refresh,
             build,
-        } => restore_project(runtime, path.as_deref(), project.as_deref(), build),
+        } => restore_project(runtime, path.as_deref(), project.as_deref(), refresh, build),
     }
 }
 
@@ -109,6 +116,29 @@ fn execute_feed(runtime: &RuntimeContext, action: NugetFeedAction) -> Result<()>
                     package.version,
                     package.path.display()
                 );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn execute_cache(action: NugetCacheAction) -> Result<()> {
+    match action {
+        NugetCacheAction::Clear { package, version } => {
+            let removed = nuget::clear_global_package_cache(&package, version.as_deref())?;
+            if removed.is_empty() {
+                println!(
+                    "no cached NuGet package entries matched {}{}",
+                    package,
+                    version
+                        .as_deref()
+                        .map(|value| format!(" {}", value))
+                        .unwrap_or_default()
+                );
+            } else {
+                for path in removed {
+                    println!("removed {}", path.display());
+                }
             }
         }
     }
@@ -184,6 +214,7 @@ fn add_package(
     path: Option<&Path>,
     project: Option<&Path>,
     no_restore: bool,
+    refresh: bool,
     build: bool,
 ) -> Result<()> {
     let root = resolve_consumer_root(path, project)?;
@@ -221,6 +252,9 @@ fn add_package(
     }
 
     let config = dotnet::ensure_workspace_config(runtime, &root, project)?;
+    if refresh {
+        refresh_package_cache(&package)?;
+    }
     let selected_project = dotnet::add_package_reference(runtime, &root, project, &package)?;
     if !no_restore {
         dotnet::restore(runtime, &root, project)?;
@@ -349,6 +383,7 @@ fn install_from_manifest(
     runtime: &RuntimeContext,
     path: Option<&Path>,
     project: Option<&Path>,
+    refresh: bool,
     build: bool,
 ) -> Result<()> {
     let root = resolve_consumer_root(path, project)?;
@@ -364,6 +399,9 @@ fn install_from_manifest(
     }
 
     let config = dotnet::ensure_workspace_config(runtime, &root, project)?;
+    if refresh {
+        refresh_packages_cache(&packages)?;
+    }
     for package in &packages {
         if package
             .source
@@ -395,10 +433,16 @@ fn restore_project(
     runtime: &RuntimeContext,
     path: Option<&Path>,
     project: Option<&Path>,
+    refresh: bool,
     build: bool,
 ) -> Result<()> {
     let root = resolve_consumer_root(path, project)?;
     let config = dotnet::ensure_workspace_config(runtime, &root, project)?;
+    if refresh {
+        if let Ok(manifest) = require_manifest(&resolve_manifest_root(path)?) {
+            refresh_packages_cache(&manifest.resolved_nuget_packages())?;
+        }
+    }
     dotnet::restore(runtime, &root, project)?;
     if build {
         dotnet::build(runtime, &root)?;
@@ -690,4 +734,28 @@ fn clean_str(value: Option<&str>) -> Option<String> {
 
 fn clean_path(value: Option<&Path>) -> Option<String> {
     value.map(|path| path.to_string_lossy().replace('\\', "/"))
+}
+
+fn refresh_package_cache(package: &NugetPackage) -> Result<()> {
+    if !package
+        .source
+        .as_deref()
+        .map(|value| value.eq_ignore_ascii_case(nuget::MNTPACK_LOCAL_SOURCE_KEY))
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    let removed = nuget::clear_global_package_cache(&package.id, package.version.as_deref())?;
+    for path in removed {
+        println!("refreshed cache entry {}", path.display());
+    }
+    Ok(())
+}
+
+fn refresh_packages_cache(packages: &[NugetPackage]) -> Result<()> {
+    for package in packages {
+        refresh_package_cache(package)?;
+    }
+    Ok(())
 }
